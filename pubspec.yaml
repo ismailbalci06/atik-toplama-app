@@ -1,0 +1,43 @@
+name: atik_toplama_app
+description: Dijital Atik Toplama Platformu - MVP
+publish_to: "none"
+version: 0.1.0+1
+
+environment:
+  sdk: ">=3.3.0 <4.0.0"
+
+dependencies:
+  flutter:
+    sdk: flutter
+
+  # --- State Management ---
+  flutter_riverpod: ^2.5.1
+
+  # --- Harita ve Konum ---
+  google_maps_flutter: ^2.6.1
+  geolocator: ^12.0.0        # Cihazin GPS konumunu almak icin
+  # Flutter Web'de HTML platform view'lerin (Google Haritalar) uzerindeki
+  # Flutter overlay'lerinin tiklamayi YUTMASINI saglar. Bu olmadan slider/
+  # buton tiklamalari haritaya sizar ve harita kayar.
+  pointer_interceptor: ^0.10.1+2
+
+  # --- Backend (Firebase) ---
+  firebase_core: ^3.1.0
+  firebase_auth: ^5.1.0        # E-posta/sifre ile giris-kayit
+  cloud_firestore: ^5.0.1     # Talep kayitlari icin (kalici veri)
+  firebase_database: ^11.0.1  # Canli konum takibi icin (Realtime DB)
+
+  # --- Yardimci ---
+  uuid: ^4.4.0                # Talepler icin benzersiz ID uretimi
+  intl: ^0.19.0               # Tarih/saat formatlama
+
+dev_dependencies:
+  flutter_test:
+    sdk: flutter
+  flutter_lints: ^4.0.0
+
+flutter:
+  uses-material-design: true
+
+  assets:
+    - assets/images/

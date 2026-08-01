@@ -1,0 +1,79 @@
+rules_version = '2';
+
+// =====================================================================
+// ATIK TOPLAMA PLATFORMU — Firestore Güvenlik Kuralları
+// =====================================================================
+// Amaç: Uygulama takıma açık bir adreste yayınlanacak. Test modunun
+// "herkes her şeyi yapabilir" hâli bu senaryoda kabul edilemez; linki
+// alan biri tüm koleksiyonu silebilir.
+//
+// Bu kurallar uygulamanın İHTİYAÇ DUYDUĞU her şeye izin verir, fazlasına
+// vermez:
+//   • Okuma          → açık (canlı akışlar bunu gerektirir)
+//   • Talep oluşturma → açık ama alan/tip/limit doğrulamalı
+//   • Güncelleme      → SADECE sevkiyat alanları (durum, toplayıcı, konum)
+//   • SİLME           → TAMAMEN KAPALI (kimse veriyi yok edemez)
+//
+// NOT: Firebase Console üzerinden yapılan düzenlemeler yönetici yetkisiyle
+// çalışır ve bu kuralları BYPASS eder. Yani demo öncesi koleksiyonu
+// Console'dan temizlemeye devam edebilirsin — kuralların engeli olmaz.
+//
+// Auth eklendiğinde (Faz 2): read/create koşulları
+// `request.auth != null` ile daraltılacak, update ise talebin sahibi veya
+// atanmış toplayıcıya kısıtlanacak.
+// =====================================================================
+
+service cloud.firestore {
+  match /databases/{database}/documents {
+
+    match /waste_requests/{requestId} {
+
+      // --- OKUMA ---
+      // İşletme kendi talebini, toplayıcı bekleyen talepleri, etki panosu
+      // tamamlanmış teslimatları dinliyor. Hepsi okuma gerektirir.
+      allow read: if true;
+
+      // --- TALEP OLUŞTURMA ---
+      // Zorunlu alanlar var mı, tipler doğru mu, miktar makul mü?
+      // (Bozuk veri girip arayüzü çökertmeyi engeller.)
+      allow create: if request.resource.data.keys().hasAll(
+                        ['userId', 'wasteTypes', 'estimatedKg', 'location', 'status']
+                      )
+                    && request.resource.data.status == 'bekliyor'
+                    && request.resource.data.location is latlng
+                    && request.resource.data.wasteTypes is list
+                    && request.resource.data.wasteTypes.size() > 0
+                    && request.resource.data.estimatedKg is number
+                    && request.resource.data.estimatedKg > 0
+                    && request.resource.data.estimatedKg <= 1000;
+
+      // --- GÜNCELLEME ---
+      // Yalnızca sevkiyat akışının değiştirdiği alanlara dokunulabilir.
+      // userId, location, wasteTypes, estimatedKg, note, createdAt
+      // DEĞİŞTİRİLEMEZ — yani kimse başkasının talebinin adresini veya
+      // miktarını sonradan çarpıtamaz.
+      allow update: if request.resource.data.diff(resource.data)
+                       .affectedKeys()
+                       .hasOnly([
+                         'status',
+                         'collectorId',
+                         'acceptedAt',
+                         'collectorLocation',
+                         'collectorBearing',
+                         'collectorName'
+                       ]);
+
+      // --- SİLME ---
+      // Uygulama hiçbir yerde silme yapmıyor; bu yüzden tamamen kapalı.
+      // Linki alan biri koleksiyonu boşaltamaz.
+      allow delete: if false;
+    }
+
+    // --- DİĞER TÜM KOLEKSİYONLAR ---
+    // Varsayılan: kapalı. İleride yeni koleksiyon eklenirse kuralı
+    // bilinçli olarak yazılmak zorunda kalınır (güvenli varsayılan).
+    match /{document=**} {
+      allow read, write: if false;
+    }
+  }
+}
