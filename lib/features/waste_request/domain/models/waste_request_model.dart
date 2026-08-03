@@ -55,7 +55,89 @@ enum RequestStatus {
   bool get isCancellable => this == RequestStatus.bekliyor;
 }
 
-/// Bir atik toplama talebini temsil eden model sinifi.
+/// GIZLILIK MASKELEMESI — konum hassasiyeti icin izgara yuvarlamasi.
+///
+/// Neden izgara (grid), rastgele kaydirma degil: rastgele kaydirmada ayni
+/// talep her okundugunda farkli bir nokta uretilirse, tekrar tekrar okuyup
+/// ortalamasini alan biri gercek konumu geri hesaplayabilir. Izgara
+/// yuvarlamasi DETERMINISTIKTIR — ayni talep her zaman ayni hucreye duser,
+/// hucre icindeki gercek nokta hicbir sekilde daraltilamaz.
+///
+/// 0.005 derece ~ 555 m (enlem). Gercek nokta, hucre merkezinin en fazla
+/// yarim hucre uzagindadir; haritada 500 m yaricapli cember bunu kapsar.
+const double kLocationGridStep = 0.005;
+
+/// Toplama noktasinin HERKESE ACIK, yaklasik gosterimi.
+LatLng snapToPrivacyGrid(LatLng exact) {
+  double snap(double v) => (v / kLocationGridStep).roundToDouble() *
+      kLocationGridStep;
+  return LatLng(snap(exact.latitude), snap(exact.longitude));
+}
+
+/// Bir talebin HASSAS detaylari — ayri, korumali dokumanda durur.
+///
+/// GUVENLIK: Firestore kurallari ALAN bazinda filtreleme yapamaz, yalnizca
+/// DOKUMAN bazinda. Bu yuzden acik adres (tam koordinat) ve kullanici notu
+/// ana dokumanda DURAMAZ; `waste_requests/{id}/private/detail` alt
+/// dokumaninda durur ve kural sadece talebin sahibine + ATANMIS toplayiciya
+/// okuma izni verir. Maske boylece istemcide degil SUNUCUDA kalkar.
+class RequestDetail {
+  const RequestDetail({
+    required this.ownerId,
+    required this.exactLocation,
+    this.note,
+  });
+
+  /// Talep sahibinin UID'si — kural bunu okuma izni icin kullanir
+  final String ownerId;
+
+  /// Toplama noktasinin TAM koordinati
+  final LatLng exactLocation;
+
+  /// Kullanicinin acik adres/kat/kapici gibi detay notu
+  final String? note;
+
+  Map<String, dynamic> toJson() => {
+        'ownerId': ownerId,
+        'exactLocation':
+            GeoPoint(exactLocation.latitude, exactLocation.longitude),
+        'note': note,
+      };
+
+  factory RequestDetail.fromJson(Map<String, dynamic> json) {
+    final geo = json['exactLocation'] as GeoPoint? ?? const GeoPoint(0, 0);
+    return RequestDetail(
+      ownerId: json['ownerId'] as String? ?? '',
+      exactLocation: LatLng(geo.latitude, geo.longitude),
+      note: json['note'] as String?,
+    );
+  }
+}
+
+/// Yeni talep olusturulurken formdan gelen ham girdi.
+///
+/// Ayri bir tip olmasi bilincli: form TAM konumu ve notu tasir, ama bunlarin
+/// hangisinin acik hangisinin korumali dokumana yazilacagina REPOSITORY
+/// karar verir. Boylece "yanlislikla hassas alani ana dokumana yazma"
+/// hatasi tek bir yerde onlenir.
+class NewRequestInput {
+  const NewRequestInput({
+    required this.wasteTypes,
+    required this.estimatedKg,
+    required this.exactLocation,
+    this.note,
+  });
+
+  final List<WasteType> wasteTypes;
+  final double estimatedKg;
+  final LatLng exactLocation;
+  final String? note;
+}
+
+/// Bir atik toplama talebini temsil eden model sinifi (ACIK dokuman).
+///
+/// Bu sinifta HASSAS VERI YOKTUR: tam koordinat ve kullanici notu
+/// [RequestDetail] icinde, korumali alt dokumanda durur.
 ///
 /// Firestore uyumu:
 /// - Konum, Firestore'un yerel [GeoPoint] tipiyle saklanir (cografi sorgu
@@ -68,8 +150,11 @@ class WasteRequest {
   final String userId;              // Talebi olusturan kullanicinin ID'si
   final List<WasteType> wasteTypes; // Secilen atik turleri (coklu secim)
   final double estimatedKg;         // Tahmini agirlik (kg)
-  final String? note;               // Kullanicinin opsiyonel notu
-  final LatLng location;            // Toplama noktasinin koordinati
+
+  /// YAKLASIK toplama konumu (~500 m izgaraya yuvarlanmis).
+  /// Herkese aciktir; tam koordinat icin [RequestDetail] gerekir.
+  final LatLng approxLocation;
+
   final RequestStatus status;       // Talebin guncel durumu
   final DateTime createdAt;         // Olusturulma zamani (sunucu saati)
   final String? collectorId;        // Talebi alan toplayicinin ID'si
@@ -94,9 +179,8 @@ class WasteRequest {
     required this.userId,
     required this.wasteTypes,
     required this.estimatedKg,
-    required this.location,
+    required this.approxLocation,
     required this.createdAt,
-    this.note,
     this.status = RequestStatus.bekliyor,
     this.collectorId,
     this.acceptedAt,
@@ -110,13 +194,16 @@ class WasteRequest {
   /// NOT: createdAt bilerek DAHIL EDILMEZ — olusturma aninda repository
   /// FieldValue.serverTimestamp() ekler. Boylece zaman damgasi her zaman
   /// sunucudan gelir, cihaz saatine guvenilmez.
+  /// GUVENLIK: Burada 'note' ve tam koordinat YOKTUR ve OLMAMALIDIR.
+  /// Firestore kurali da bu iki anahtari ana dokumanda reddeder — yani
+  /// ileride biri yanlislikla eklerse yazma sunucuda basarisiz olur.
   Map<String, dynamic> toJson() {
     return {
       'userId': userId,
       'wasteTypes': wasteTypes.map((t) => t.name).toList(),
       'estimatedKg': estimatedKg,
-      'note': note,
-      'location': GeoPoint(location.latitude, location.longitude),
+      'approxLocation':
+          GeoPoint(approxLocation.latitude, approxLocation.longitude),
       'status': status.name,
       'collectorId': collectorId,
       'acceptedAt':
@@ -136,7 +223,19 @@ class WasteRequest {
   /// serverTimestamp henuz sunucuya islenmemisken null gelebilir;
   /// bu durumda gecici olarak cihaz saati kullanilir.
   factory WasteRequest.fromJson(String id, Map<String, dynamic> json) {
-    final geo = json['location'] as GeoPoint? ?? const GeoPoint(0, 0);
+    // Yeni sema: approxLocation. ESKI dokumanlar (gizlilik yamasindan once
+    // olusturulmus) tam koordinati 'location' alaninda tasiyor — onlari da
+    // izgaraya yuvarlayarak okuyoruz ki arayuz eski veride de maskeli
+    // kalsin. (Eski dokumanlarin Firestore'daki hali yine de hassastir;
+    // kalici cozum Console'dan temizlemektir.)
+    final geo = json['approxLocation'] as GeoPoint? ??
+        json['location'] as GeoPoint? ??
+        const GeoPoint(0, 0);
+    final raw = LatLng(geo.latitude, geo.longitude);
+    final approx = json['approxLocation'] == null
+        ? snapToPrivacyGrid(raw) // eski kayit: yuvarlayarak goster
+        : raw;
+
     return WasteRequest(
       id: id,
       userId: json['userId'] as String? ?? '',
@@ -144,8 +243,7 @@ class WasteRequest {
           .map((name) => WasteType.fromName(name as String))
           .toList(),
       estimatedKg: (json['estimatedKg'] as num? ?? 0).toDouble(),
-      note: json['note'] as String?,
-      location: LatLng(geo.latitude, geo.longitude),
+      approxLocation: approx,
       status: RequestStatus.fromName(json['status'] as String?),
       createdAt:
           (json['createdAt'] as Timestamp?)?.toDate() ?? DateTime.now(),
@@ -178,8 +276,7 @@ class WasteRequest {
       userId: userId,
       wasteTypes: wasteTypes,
       estimatedKg: estimatedKg,
-      note: note,
-      location: location,
+      approxLocation: approxLocation,
       createdAt: createdAt,
       status: status ?? this.status,
       collectorId: collectorId ?? this.collectorId,

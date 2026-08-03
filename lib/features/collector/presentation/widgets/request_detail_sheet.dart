@@ -13,8 +13,9 @@ import '../../../waste_request/domain/models/waste_request_model.dart';
 Future<bool?> showRequestDetailSheet(
   BuildContext context, {
   required WasteRequest request,
-  required double distanceKm, // Toplayicinin talebe kus ucusu uzakligi
-  required bool isAccepted,   // Bu talep daha once alinmis mi?
+  required double distanceKm, // Toplayicinin talebe YAKLASIK uzakligi
+  required bool isAccepted,   // Bu talep bizim uzerimizde mi?
+  RequestDetail? detail,      // Tam adres + not — SADECE talep bizdeyse
 }) {
   return showModalBottomSheet<bool>(
     context: context,
@@ -25,6 +26,7 @@ Future<bool?> showRequestDetailSheet(
       request: request,
       distanceKm: distanceKm,
       isAccepted: isAccepted,
+      detail: detail,
     ),
   );
 }
@@ -35,11 +37,17 @@ class RequestDetailSheet extends StatelessWidget {
     required this.request,
     required this.distanceKm,
     required this.isAccepted,
+    this.detail,
   });
 
   final WasteRequest request;
   final double distanceKm;
   final bool isAccepted;
+
+  /// Hassas detay. NULL ise talep henuz bizde degildir ve adres/not
+  /// gosterilmez — bu bir arayuz tercihi degil, verinin gercekten
+  /// elimizde olmamasidir (Firestore kurali okumaya izin vermez).
+  final RequestDetail? detail;
 
   /// Talebin ne kadar once olusturuldugunu insan diliyle yazar.
   /// Orn: "25 dk önce", "2 sa önce"
@@ -137,14 +145,20 @@ class RequestDetailSheet extends StatelessWidget {
               _InfoBox(
                 icon: Icons.near_me,
                 label: 'Uzaklık',
-                value: '${NumberFormat("0.0").format(distanceKm)} km',
+                // Konum maskeliyken mesafe de yaklasiktir; "≈" bunu
+                // acikca soyler, olmayan bir hassasiyet iddia etmeyiz.
+                value: detail == null
+                    ? '≈${NumberFormat("0.0").format(distanceKm)} km'
+                    : '${NumberFormat("0.0").format(distanceKm)} km',
               ),
             ],
           ),
 
-          // --- Kullanici notu (varsa goster) ---
-          if (request.note != null) ...[
-            const SizedBox(height: 14),
+          // --- Adres detayi: maskeli mi, acik mi? ---
+          const SizedBox(height: 14),
+          if (detail == null)
+            _MaskedAddressBox()
+          else if (detail!.note != null && detail!.note!.trim().isNotEmpty)
             Container(
               width: double.infinity,
               padding: const EdgeInsets.all(12),
@@ -161,14 +175,13 @@ class RequestDetailSheet extends StatelessWidget {
                   const SizedBox(width: 8),
                   Expanded(
                     child: Text(
-                      request.note!,
+                      detail!.note!,
                       style: const TextStyle(fontSize: 13),
                     ),
                   ),
                 ],
               ),
             ),
-          ],
           const SizedBox(height: 20),
 
           // --- Ana aksiyon butonu ---
@@ -207,6 +220,60 @@ class RequestDetailSheet extends StatelessWidget {
           ),
         ],
       ),
+      ),
+    );
+  }
+}
+
+/// Talep henuz uzerimize alinmamisken adres yerine gosterilen kutu.
+///
+/// Bilincli olarak "gizli" degil "henuz acilmadi" dili kullaniliyor:
+/// toplayici bir sey kacirmiyor, sadece sirasi gelmemis.
+class _MaskedAddressBox extends StatelessWidget {
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      width: double.infinity,
+      padding: const EdgeInsets.all(12),
+      decoration: BoxDecoration(
+        color: AppColors.background,
+        borderRadius: BorderRadius.circular(10),
+        border: Border.all(color: AppColors.border),
+      ),
+      child: Row(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Container(
+            width: 32,
+            height: 32,
+            decoration: BoxDecoration(
+              color: AppColors.surface,
+              borderRadius: BorderRadius.circular(9),
+              border: Border.all(color: AppColors.border),
+            ),
+            child: const Icon(Icons.lock_outline,
+                size: 17, color: AppColors.textSecondary),
+          ),
+          const SizedBox(width: 10),
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                Text(
+                  'Adres yaklaşık bölge olarak gösteriliyor',
+                  style: Theme.of(context).textTheme.titleSmall,
+                ),
+                const SizedBox(height: 3),
+                Text(
+                  'Tam adres ve müşteri notu, talebi üstlendiğinizde '
+                  'açılır. Bu, müşteri verisinin korunması içindir.',
+                  style: Theme.of(context).textTheme.bodySmall,
+                ),
+              ],
+            ),
+          ),
+        ],
       ),
     );
   }

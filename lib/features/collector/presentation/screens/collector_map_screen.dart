@@ -61,6 +61,15 @@ class _CollectorMapScreenState extends ConsumerState<CollectorMapScreen>
   List<LatLng> _activeRoutePoints = [];
   WasteRequest? _activeRequest;
 
+  /// Aktif talebin TAM adresi — talep uzerimize alindiktan sonra korumali
+  /// detay dokumanindan okunur. Alinmadan once bu deger YOKTUR; maske
+  /// bu yuzden gercek bir maskedir, gorsel bir susleme degil.
+  LatLng? _activeDestination;
+
+  /// Aktif talebin hassas detayi (tam konum + kullanici notu).
+  /// Firestore kurali bu dokumani yalnizca ATANMIS toplayiciya acar.
+  RequestDetail? _activeDetail;
+
   /// Haritadaki aktif rota cizgisi
   final Set<Polyline> _polylines = {};
 
@@ -79,6 +88,11 @@ class _CollectorMapScreenState extends ConsumerState<CollectorMapScreen>
   /// maliyetli hem gereksiz; ~900 ms yeterince akici bir canli takip verir.
   DateTime _lastLocationPush = DateTime.fromMillisecondsSinceEpoch(0);
   static const _locationPushInterval = Duration(milliseconds: 900);
+
+  /// Maskeleme cemberinin yaricapi (metre). Konum izgarasi ~555 m
+  /// oldugundan gercek nokta merkeze en fazla ~278 m uzaktadir; 500 m
+  /// yaricap onu kesin kapsar ve icinde nerede oldugunu belli etmez.
+  static const double _maskRadiusMeters = 500;
 
   @override
   void initState() {
@@ -149,6 +163,7 @@ class _CollectorMapScreenState extends ConsumerState<CollectorMapScreen>
     setState(() {
       _polylines.clear();
       _activeRequest = null;
+      _activeDestination = null; // teslimat bitti -> adres yeniden gizlenir
       _activeRoutePoints = [];
       // Oturum ozetini guncelle (bellekte; ekstra sorgu/yazma yok)
       _sessionKg += arrivedRequest.estimatedKg;
@@ -207,11 +222,19 @@ class _CollectorMapScreenState extends ConsumerState<CollectorMapScreen>
       return;
     }
 
+    final isMine = _activeRequest?.id == request.id;
+
     final accepted = await showRequestDetailSheet(
       context,
       request: request,
-      distanceKm: MapUtils.distanceKm(_collectorPosition, request.location),
-      isAccepted: _activeRequest?.id == request.id,
+      // Mesafe YAKLASIK konumdan hesaplanir; kartta da "≈" ile gosterilir.
+      // Talebi almadan once toplayicinin elinde zaten bu veri var.
+      distanceKm:
+          MapUtils.distanceKm(_collectorPosition, request.approxLocation),
+      isAccepted: isMine,
+      // Adres detayi SADECE talep bizdeyse gosterilir; o zaman da veriyi
+      // sunucudan yetkiyle okuduk demektir.
+      detail: isMine ? _activeDetail : null,
     );
 
     if (accepted != true || !mounted) return;
@@ -252,7 +275,44 @@ class _CollectorMapScreenState extends ConsumerState<CollectorMapScreen>
     }
 
     if (!mounted) return;
-    _startTrip(request);
+
+    // --- Maske kalkti: TAM adresi simdi okuyabiliriz ---
+    // Bu okuma, transaction ile collectorId'yi uzerimize yazdigimiz icin
+    // basarili olur. Talebi almasaydik ayni cagri permission-denied alirdi.
+    final RequestDetail? detail;
+    try {
+      detail =
+          await ref.read(wasteRequestRepositoryProvider).getDetail(request.id);
+    } catch (e) {
+      final message = logAndReadError(e, context: 'getDetail');
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text('Adres detayı alınamadı: $message'),
+            backgroundColor: AppColors.error,
+            behavior: SnackBarBehavior.floating,
+          ),
+        );
+      }
+      return;
+    }
+
+    if (!mounted) return;
+    if (detail == null) {
+      // Adres detayi yoksa rota cizilemez — sessizce yanlis yere gitmektense
+      // durumu acikca soyluyoruz.
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text('Bu talebin adres detayı bulunamadı.'),
+          backgroundColor: AppColors.error,
+          behavior: SnackBarBehavior.floating,
+        ),
+      );
+      return;
+    }
+
+    _activeDetail = detail;
+    _startTrip(request, detail.exactLocation);
   }
 
   /// Bekleyen talepleri LISTE olarak acar (haritada pin avlamaya gerek yok).
@@ -261,8 +321,8 @@ class _CollectorMapScreenState extends ConsumerState<CollectorMapScreen>
   void _showPendingList(List<WasteRequest> pending) {
     Haptics.tap();
     final sorted = [...pending]
-      ..sort((a, b) => MapUtils.distanceKm(_collectorPosition, a.location)
-          .compareTo(MapUtils.distanceKm(_collectorPosition, b.location)));
+      ..sort((a, b) => MapUtils.distanceKm(_collectorPosition, a.approxLocation)
+          .compareTo(MapUtils.distanceKm(_collectorPosition, b.approxLocation)));
 
     showModalBottomSheet<void>(
       context: context,
@@ -315,7 +375,7 @@ class _CollectorMapScreenState extends ConsumerState<CollectorMapScreen>
                     Divider(height: 1, color: Colors.grey.shade200),
                 itemBuilder: (_, i) {
                   final r = sorted[i];
-                  final km = MapUtils.distanceKm(_collectorPosition, r.location);
+                  final km = MapUtils.distanceKm(_collectorPosition, r.approxLocation);
                   return ListTile(
                     leading: CircleAvatar(
                       radius: 18,
@@ -344,7 +404,7 @@ class _CollectorMapScreenState extends ConsumerState<CollectorMapScreen>
                       Navigator.of(sheetCtx).pop();
                       // Kamerayi talebe kaydir, sonra detay/al akisini ac
                       _mapController?.animateCamera(
-                        CameraUpdate.newLatLngZoom(r.location, 14),
+                        CameraUpdate.newLatLngZoom(r.approxLocation, 14),
                       );
                       _onMarkerTapped(r);
                     },
@@ -360,12 +420,17 @@ class _CollectorMapScreenState extends ConsumerState<CollectorMapScreen>
   }
 
   /// Rota cizer, kamerayi odaklar ve arac animasyonunu baslatir.
-  void _startTrip(WasteRequest request) {
+  ///
+  /// [destination] TAM adrestir ve YALNIZCA talep basariyla uzerimize
+  /// alindiktan sonra elde edilebilir (korumali detay dokumani). Yani
+  /// rota, maskenin sunucuda kalkmasindan sonra cizilir.
+  void _startTrip(WasteRequest request, LatLng destination) {
     final routePoints =
-        MapUtils.buildCurvedRoute(_collectorPosition, request.location);
+        MapUtils.buildCurvedRoute(_collectorPosition, destination);
 
     setState(() {
       _activeRequest = request;
+      _activeDestination = destination;
       _activeRoutePoints = routePoints;
       _polylines
         ..clear()
@@ -381,7 +446,7 @@ class _CollectorMapScreenState extends ConsumerState<CollectorMapScreen>
     // GUVENLI sigdirma: noktalar cok yakinsa sabit zoom'a duser,
     // dejenere bounds yuzunden olusan "beyaz ekran / sonsuz zoom" olmaz.
     _mapController?.animateCamera(
-      MapUtils.fitTwoPoints(_collectorPosition, request.location),
+      MapUtils.fitTwoPoints(_collectorPosition, destination),
     );
 
     ScaffoldMessenger.of(context).showSnackBar(
@@ -421,39 +486,49 @@ class _CollectorMapScreenState extends ConsumerState<CollectorMapScreen>
       ),
     };
 
-    // Bekleyen talepler: Firestore stream'inden gelen CANLI liste.
-    // (Alinan talepler 'bekliyor' filtresinden ciktigi icin listeden
-    // kendiliginden duser — ekstra temizlik kodu gerekmez.)
-    for (final request in pendingRequests) {
-      markers.add(
-        Marker(
-          markerId: MarkerId(request.id),
-          position: request.location,
-          // Ozel turuncu geri donusum pini (ucu altta -> anchor 0.5,1.0)
-          icon: icons?.pending ??
-              BitmapDescriptor.defaultMarkerWithHue(BitmapDescriptor.hueOrange),
-          anchor: const Offset(0.5, 1.0),
-          onTap: () => _onMarkerTapped(request),
-        ),
-      );
-    }
+    // GIZLILIK: Bekleyen talepler icin PIN CIZILMEZ. Tam adres bu asamada
+    // toplayiciya kapali oldugu icin harita da nokta gostermez; onun yerine
+    // yaklasik bolgeyi anlatan bir cember cizilir (bkz. _buildCircles).
 
-    // Su an gidilen hedef artik "bekleyen" listesinde degil;
-    // pinini yesil olarak biz ekleriz ki haritada gorunmeye devam etsin
+    // Su an gidilen hedef artik "bekleyen" listesinde degil; tam adresi
+    // uzerimize aldigimiz icin ARTIK NOKTA PIN cizebiliriz.
     final active = _activeRequest;
-    if (active != null) {
+    final destination = _activeDestination;
+    if (active != null && destination != null) {
       markers.add(
         Marker(
           markerId: MarkerId(active.id),
-          position: active.location,
+          position: destination,
           icon: icons?.completed ??
               BitmapDescriptor.defaultMarkerWithHue(BitmapDescriptor.hueGreen),
           anchor: const Offset(0.5, 1.0),
+          infoWindow: const InfoWindow(title: 'Toplama adresi'),
           onTap: () => _onMarkerTapped(active),
         ),
       );
     }
     return markers;
+  }
+
+  /// Bekleyen taleplerin YAKLASIK bolgesini cizen cemberler.
+  ///
+  /// Yaricap [_maskRadiusMeters], konum izgarasinin (~555 m) yarisindan
+  /// buyuk secildi: gercek nokta cemberin icinde OLDUGU garanti, ama
+  /// cemberin neresinde oldugu belirsiz. Toplayici "buralarda bir is var"
+  /// bilgisini alir, adresi almaz.
+  Set<Circle> _buildCircles(List<WasteRequest> pendingRequests) {
+    return pendingRequests.map((request) {
+      return Circle(
+        circleId: CircleId('area-${request.id}'),
+        center: request.approxLocation,
+        radius: _maskRadiusMeters,
+        fillColor: AppColors.primary.withOpacity(0.14),
+        strokeColor: AppColors.primary.withOpacity(0.55),
+        strokeWidth: 2,
+        consumeTapEvents: true,
+        onTap: () => _onMarkerTapped(request),
+      );
+    }).toSet();
   }
 
   // ---------------------------------------------------------------
@@ -505,6 +580,9 @@ class _CollectorMapScreenState extends ConsumerState<CollectorMapScreen>
               zoom: 14,
             ),
             markers: _buildMarkers(pendingRequests, markerIcons),
+            // Bekleyen talepler nokta yerine YAKLASIK BOLGE cemberi olarak
+            // cizilir; cembere dokunmak detay kartini acar.
+            circles: _buildCircles(pendingRequests),
             polylines: polylines,
             zoomControlsEnabled: false,
             // Kamera, pinleri TUM ekrana degil ust/alt UI kartlarinin

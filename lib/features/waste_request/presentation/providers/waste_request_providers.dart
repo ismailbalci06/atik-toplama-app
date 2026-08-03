@@ -48,3 +48,15 @@ final userRequestsProvider = StreamProvider.autoDispose
     .family<List<WasteRequest>, String>((ref, userId) {
   return ref.watch(wasteRequestRepositoryProvider).getRequestsByUser(userId);
 });
+
+/// HASSAS DETAY: tam koordinat + kullanici notu.
+///
+/// Yetkisi olmayan biri dinlerse Firestore permission-denied firlatir ve
+/// bu provider ERROR durumuna duser — arayuz de o zaman maskeli halini
+/// gosterir. Yani "gosterme karari" kodun degil, SUNUCUNUN.
+///
+/// Yetki: talebin sahibi veya talebi uzerine almis toplayici.
+final requestDetailProvider = StreamProvider.autoDispose
+    .family<RequestDetail?, String>((ref, requestId) {
+  return ref.watch(wasteRequestRepositoryProvider).watchDetail(requestId);
+});

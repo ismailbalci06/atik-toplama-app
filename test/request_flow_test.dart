@@ -20,7 +20,7 @@ WasteRequest _request(RequestStatus status) => WasteRequest(
       userId: 'u1',
       wasteTypes: const [WasteType.plastik],
       estimatedKg: 80,
-      location: const LatLng(41.0, 29.0),
+      approxLocation: const LatLng(41.0, 29.0),
       createdAt: DateTime.now(),
       status: status,
     );

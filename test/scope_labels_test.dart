@@ -28,7 +28,7 @@ void main() {
       userId: 'u1',
       wasteTypes: const [WasteType.plastik, WasteType.kagit],
       estimatedKg: 120,
-      location: const LatLng(41.0, 29.0),
+      approxLocation: const LatLng(41.0, 29.0),
       createdAt: DateTime.now(),
       status: RequestStatus.tamamlandi,
     ),

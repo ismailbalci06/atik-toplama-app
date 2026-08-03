@@ -23,20 +23,85 @@ class WasteRequestRepository {
   CollectionReference<Map<String, dynamic>> get _requests =>
       _firestore.collection(_collectionName);
 
+  /// HASSAS detay dokumaninin yolu: waste_requests/{id}/private/detail
+  ///
+  /// Alt koleksiyon olmasi bilincli: Firestore kurallari alan bazinda
+  /// filtreleyemez, doküman bazinda filtreler. Tam koordinat ve not ayri
+  /// dokumanda oldugu icin kural onlari talep sahibi + atanmis toplayici
+  /// disinda HERKESE kapatabiliyor.
+  static const _privateSub = 'private';
+  static const _detailDoc = 'detail';
+
+  DocumentReference<Map<String, dynamic>> _detailRef(String requestId) =>
+      _requests.doc(requestId).collection(_privateSub).doc(_detailDoc);
+
   // ---------------------------------------------------------------
   // YAZMA ISLEMLERI
   // ---------------------------------------------------------------
 
   /// Yeni talep olusturur ve olusan dokuman ID'sini dondurur.
   ///
+  /// GIZLILIK MIMARISI — talep IKI dokumana yazilir:
+  ///   1. waste_requests/{id}          -> yaklasik konum, tur, kg (acik)
+  ///   2. waste_requests/{id}/private/detail -> TAM konum + not (korumali)
+  ///
+  /// Ikisi tek bir WriteBatch ile atomik yazilir: ya ikisi de olusur ya
+  /// hicbiri. Aksi halde "acik dokuman var ama adresi yok" gibi yarim bir
+  /// talep olusabilir ve toplayici adrese hic ulasamazdi.
+  ///
+  /// Yaklasik konumu BURADA hesapliyoruz (cagiran ekranda degil): boylece
+  /// tam koordinatin ana dokumana sizmasi yapisal olarak imkansiz.
+  ///
   /// createdAt alanini SUNUCU saati ile ekler (serverTimestamp) —
   /// boylece siralama, cihaz saatleri yanlis olsa bile dogru kalir.
-  Future<String> addRequest(WasteRequest request) async {
-    final doc = await _requests.add({
-      ...request.toJson(),
+  Future<String> addRequest({
+    required NewRequestInput input,
+    required String userId,
+  }) async {
+    final docRef = _requests.doc(); // ID'yi onceden al (batch icin gerekli)
+
+    final publicData = WasteRequest(
+      id: docRef.id,
+      userId: userId,
+      wasteTypes: input.wasteTypes,
+      estimatedKg: input.estimatedKg,
+      approxLocation: snapToPrivacyGrid(input.exactLocation),
+      createdAt: DateTime.now(), // toJson'a girmez; sunucu saati kullanilir
+    ).toJson();
+
+    final detail = RequestDetail(
+      ownerId: userId,
+      exactLocation: input.exactLocation,
+      note: input.note,
+    );
+
+    final batch = _firestore.batch();
+    batch.set(docRef, {
+      ...publicData,
       'createdAt': FieldValue.serverTimestamp(),
     });
-    return doc.id;
+    batch.set(_detailRef(docRef.id), detail.toJson());
+    await batch.commit();
+
+    return docRef.id;
+  }
+
+  /// Talebin HASSAS detayini (tam konum + not) tek seferlik okur.
+  ///
+  /// Yetkisi olmayan biri cagirirsa Firestore permission-denied firlatir —
+  /// yani maske arayuzde degil SUNUCUDA uygulanir. Yetki: talep sahibi
+  /// veya talebi uzerine almis toplayici.
+  Future<RequestDetail?> getDetail(String requestId) async {
+    final doc = await _detailRef(requestId).get();
+    if (!doc.exists) return null;
+    return RequestDetail.fromJson(doc.data() ?? {});
+  }
+
+  /// Talebin hassas detayinin canli akisi (takip ekrani icin).
+  Stream<RequestDetail?> watchDetail(String requestId) {
+    return _detailRef(requestId).snapshots().map(
+          (doc) => doc.exists ? RequestDetail.fromJson(doc.data() ?? {}) : null,
+        );
   }
 
   /// Toplayicinin talebi uzerine almasi.

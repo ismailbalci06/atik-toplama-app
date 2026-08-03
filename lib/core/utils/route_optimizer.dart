@@ -56,7 +56,7 @@ class RouteOptimizer {
       var bestDistance = double.infinity;
 
       for (var i = 0; i < remaining.length; i++) {
-        final d = MapUtils.distanceKm(current, remaining[i].location);
+        final d = MapUtils.distanceKm(current, remaining[i].approxLocation);
         if (d < bestDistance) {
           bestDistance = d;
           bestIndex = i;
@@ -66,9 +66,9 @@ class RouteOptimizer {
       // En yakin duragi rotaya ekle ve oraya "tasin"
       final next = remaining.removeAt(bestIndex);
       ordered.add(next);
-      path.add(next.location);
+      path.add(next.approxLocation);
       total += bestDistance;
-      current = next.location;
+      current = next.approxLocation;
     }
 
     return OptimizedRoute(

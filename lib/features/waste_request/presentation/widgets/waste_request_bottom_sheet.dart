@@ -1,7 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:google_maps_flutter/google_maps_flutter.dart';
 import 'package:pointer_interceptor/pointer_interceptor.dart';
-import 'package:uuid/uuid.dart';
 
 import '../../../../core/constants/app_colors.dart';
 import '../../../../core/theme/app_theme.dart';
@@ -11,18 +10,21 @@ import '../../domain/models/waste_request_model.dart';
 /// Alt kisimdan acilan "Atik Talebi Olusturma" formu.
 ///
 /// [showWasteRequestSheet] yardimci fonksiyonu ile acilir.
-/// Kullanici formu doldurup onayladiginda geriye bir [WasteRequest]
-/// nesnesi doner; iptal ederse null doner.
-Future<WasteRequest?> showWasteRequestSheet(
+/// Kullanici formu doldurup onayladiginda geriye bir [NewRequestInput]
+/// doner; iptal ederse null doner.
+///
+/// NOT: Form artik hazir bir [WasteRequest] uretmiyor. Sebep gizlilik:
+/// buradaki konum TAM koordinattir ve notu da tasir; bunlarin hangisinin
+/// ACIK hangisinin KORUMALI dokumana yazilacagina repository karar verir.
+Future<NewRequestInput?> showWasteRequestSheet(
   BuildContext context, {
-  required LatLng location, // Haritada secilen/mevcut konum
-  required String userId,   // Talebi olusturan kullanicinin gercek UID'si
+  required LatLng location, // Haritada secilen/mevcut TAM konum
 }) {
-  return showModalBottomSheet<WasteRequest>(
+  return showModalBottomSheet<NewRequestInput>(
     context: context,
     isScrollControlled: true, // Klavye acilinca sheet'in yukselebilmesi icin
     backgroundColor: Colors.transparent,
-    builder: (_) => WasteRequestBottomSheet(location: location, userId: userId),
+    builder: (_) => WasteRequestBottomSheet(location: location),
   );
 }
 
@@ -30,14 +32,10 @@ class WasteRequestBottomSheet extends StatefulWidget {
   const WasteRequestBottomSheet({
     super.key,
     required this.location,
-    required this.userId,
   });
 
-  /// Talebin olusturulacagi koordinat (haritadan gelir)
+  /// Talebin olusturulacagi TAM koordinat (haritadan gelir)
   final LatLng location;
-
-  /// Talebi olusturan kullanicinin Firebase UID'si
-  final String userId;
 
   @override
   State<WasteRequestBottomSheet> createState() =>
@@ -99,20 +97,17 @@ class _WasteRequestBottomSheetState extends State<WasteRequestBottomSheet> {
 
     Haptics.action(); // Talep olusturma onayi
 
-    final request = WasteRequest(
-      id: const Uuid().v4(), // Benzersiz talep ID'si
-      userId: widget.userId, // gercek Firebase UID
+    final input = NewRequestInput(
       wasteTypes: _selectedTypes.toList(),
       estimatedKg: _estimatedKg,
+      exactLocation: widget.location,
       note: _noteController.text.trim().isEmpty
           ? null
           : _noteController.text.trim(),
-      location: widget.location,
-      createdAt: DateTime.now(),
     );
 
-    // Sheet'i kapat ve olusturulan talebi geri dondur
-    Navigator.of(context).pop(request);
+    // Sheet'i kapat ve form girdisini geri dondur
+    Navigator.of(context).pop(input);
   }
 
   @override
@@ -267,12 +262,36 @@ class _WasteRequestBottomSheetState extends State<WasteRequestBottomSheet> {
                 controller: _noteController,
                 maxLines: 2,
                 decoration: InputDecoration(
-                  labelText: 'Not (opsiyonel)',
+                  labelText: 'Adres detayı / not (opsiyonel)',
                   hintText: 'Örn: Kapıcıya bırakılacak, 3. kat...',
                   border: OutlineInputBorder(
                     borderRadius: BorderRadius.circular(12),
                   ),
                 ),
+              ),
+              const SizedBox(height: 8),
+
+              // --- Gizlilik bilgilendirmesi ---
+              // Kullanici acik adresini yazarken bunun kimlerle
+              // paylasilacagini BILMELI (KVKK aydinlatma mantigi).
+              Row(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Icon(Icons.lock_outline,
+                      size: 15, color: Colors.grey.shade600),
+                  const SizedBox(width: 6),
+                  Expanded(
+                    child: Text(
+                      'Tam adresiniz ve notunuz yalnızca talebi üstlenen '
+                      'toplayıcıya açılır. Diğer toplayıcılar haritada '
+                      'sadece yaklaşık bir bölge görür.',
+                      style: TextStyle(
+                          fontSize: 11.5,
+                          height: 1.35,
+                          color: Colors.grey.shade600),
+                    ),
+                  ),
+                ],
               ),
               const SizedBox(height: 20),
 

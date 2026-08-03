@@ -101,6 +101,15 @@ class _RequestTrackingScreenState extends ConsumerState<RequestTrackingScreen>
   /// Iptal istegi surerken butonu kilitler (cift gonderim olmasin)
   bool _cancelling = false;
 
+  /// TAM toplama koordinati — korumali detay dokumanindan gelir.
+  /// Kullanici talebin sahibi oldugu icin okuma yetkisi vardir.
+  LatLng? _exactLocation;
+
+  /// Rota ve varis hesaplarinin hedefi.
+  /// Detay henuz gelmediyse yaklasik konuma duser; boylece harita bos
+  /// kalmaz, detay gelince rota gercek adrese gore yeniden kurulur.
+  LatLng get _destination => _exactLocation ?? widget.request.approxLocation;
+
   /// Ekran kapanma surecine girdi mi? Firestore'dan ayni durum iki kez
   /// dusarse iki kez pop() cagrilip ALTTAKI ekranin da kapanmasini onler.
   bool _leaving = false;
@@ -181,6 +190,24 @@ class _RequestTrackingScreenState extends ConsumerState<RequestTrackingScreen>
     }
   }
 
+  /// Korumali detay geldi: hedefi yaklasik konumdan GERCEK adrese cevir.
+  ///
+  /// Rota, toplayicinin ilk canli konumu geldiginde kurulur. Detay ondan
+  /// SONRA gelirse rota yaklasik noktaya cizilmis olur; o yuzden burada
+  /// bir kez yeniden kuruyoruz. Iki sira da (detay once / sonra) dogru
+  /// calisir.
+  void _onDetailLoaded(LatLng exact) {
+    if (_exactLocation != null) return; // adres degismez, bir kez yeter
+    setState(() {
+      _exactLocation = exact;
+      final start = _routeStart;
+      if (start != null) {
+        _routePoints = MapUtils.buildCurvedRoute(start, exact);
+        _totalKm = MapUtils.distanceKm(start, exact);
+      }
+    });
+  }
+
   /// "Talebi İptal Et" — YALNIZCA henuz toplayici atanmamisken cagrilir.
   ///
   /// Iptal, Firestore'da status alanini 'iptal' yapar; talep toplayici
@@ -243,14 +270,14 @@ class _RequestTrackingScreenState extends ConsumerState<RequestTrackingScreen>
     // ekranda CIZGI BIREBIR AYNI olur.
     if (_routeStart == null) {
       _routeStart = live;
-      _routePoints = MapUtils.buildCurvedRoute(live, widget.request.location);
-      _totalKm = MapUtils.distanceKm(live, widget.request.location);
+      _routePoints = MapUtils.buildCurvedRoute(live, _destination);
+      _totalKm = MapUtils.distanceKm(live, _destination);
       _from = live;
       _to = live;
 
       // Rotanin tamamini guvenli sekilde cerceve icine al
       _mapController?.animateCamera(
-        MapUtils.fitTwoPoints(live, widget.request.location),
+        MapUtils.fitTwoPoints(live, _destination),
       );
     }
 
@@ -292,7 +319,7 @@ class _RequestTrackingScreenState extends ConsumerState<RequestTrackingScreen>
   double get _remainingKm {
     final v = _currentVehiclePosition;
     if (v == null) return _totalKm;
-    return MapUtils.distanceKm(v, widget.request.location);
+    return MapUtils.distanceKm(v, _destination);
   }
 
   /// Gercek mesafeye dayali ilerleme (0-1) — sahte sayac degil.
@@ -342,7 +369,7 @@ class _RequestTrackingScreenState extends ConsumerState<RequestTrackingScreen>
     return {
       Marker(
         markerId: const MarkerId('home'),
-        position: widget.request.location,
+        position: _destination,
         icon: icons?.home ??
             BitmapDescriptor.defaultMarkerWithHue(BitmapDescriptor.hueGreen),
         anchor: const Offset(0.5, 1.0),
@@ -567,6 +594,14 @@ class _RequestTrackingScreenState extends ConsumerState<RequestTrackingScreen>
       if (request != null) _syncWithRequest(request);
     });
 
+    // KORUMALI DETAY: tam adres. Kullanici talebin sahibi oldugu icin
+    // Firestore kurali bu okumaya izin verir; baskasi ayni dokumani
+    // dinlemeye kalkarsa permission-denied alir.
+    ref.listen(requestDetailProvider(widget.request.id), (previous, next) {
+      final detail = next.valueOrNull;
+      if (detail != null) _onDetailLoaded(detail.exactLocation);
+    });
+
     final markerIcons = ref.watch(markerIconsProvider).valueOrNull;
 
     return Scaffold(
@@ -581,7 +616,7 @@ class _RequestTrackingScreenState extends ConsumerState<RequestTrackingScreen>
           GoogleMap(
             onMapCreated: (c) => _mapController = c,
             initialCameraPosition: CameraPosition(
-              target: widget.request.location,
+              target: _destination,
               zoom: 14,
             ),
             markers: _buildMarkers(markerIcons),

@@ -9,18 +9,30 @@ rules_version = '2';
 //
 // Bu kurallar uygulamanın İHTİYAÇ DUYDUĞU her şeye izin verir, fazlasına
 // vermez:
-//   • Okuma          → açık (canlı akışlar bunu gerektirir)
-//   • Talep oluşturma → açık ama alan/tip/limit doğrulamalı
+//   • Okuma          → SADECE giriş yapmış kullanıcılar
+//   • Talep oluşturma → giriş şartlı + alan/tip/limit doğrulamalı
 //   • Güncelleme      → SADECE sevkiyat alanları (durum, toplayıcı, konum)
 //   • SİLME           → TAMAMEN KAPALI (kimse veriyi yok edemez)
+//
+// ---------------------------------------------------------------------
+// GİZLİLİK MASKELEMESİ (KVKK) — neden iki dokümanlı model?
+// ---------------------------------------------------------------------
+// Firestore kuralları ALAN bazında filtreleme yapamaz; bir dokümanı ya
+// tamamen okutur ya hiç okutmaz. Bu yüzden açık adres (tam koordinat) ve
+// kullanıcı notu ana dokümanda DURAMAZ — orada dursaydı, arayüzde
+// gizlesek bile herkes ham dokümanı okuyabilirdi (uygulamayı hiç açmadan,
+// düz bir HTTP isteğiyle).
+//
+// Çözüm: hassas alanlar `waste_requests/{id}/private/detail` alt
+// dokümanında durur ve YALNIZCA şu ikisi okuyabilir:
+//   • talebin sahibi (ownerId)
+//   • talebi üzerine almış toplayıcı (üst dokümandaki collectorId)
+// Yani maske, "Talebi Al" transaction'ı başarılı olduğu anda SUNUCUDA
+// kalkar; istemcinin insafına bırakılmaz.
 //
 // NOT: Firebase Console üzerinden yapılan düzenlemeler yönetici yetkisiyle
 // çalışır ve bu kuralları BYPASS eder. Yani demo öncesi koleksiyonu
 // Console'dan temizlemeye devam edebilirsin — kuralların engeli olmaz.
-//
-// Auth eklendiğinde (Faz 2): read/create koşulları
-// `request.auth != null` ile daraltılacak, update ise talebin sahibi veya
-// atanmış toplayıcıya kısıtlanacak.
 // =====================================================================
 
 service cloud.firestore {
@@ -31,16 +43,26 @@ service cloud.firestore {
       // --- OKUMA ---
       // İşletme kendi talebini, toplayıcı bekleyen talepleri, etki panosu
       // tamamlanmış teslimatları dinliyor. Hepsi okuma gerektirir.
-      allow read: if true;
+      // ARTIK GİRİŞ ŞARTLI: linki bilen anonim biri koleksiyonu okuyamaz.
+      // (Bu dokümanda hassas veri yok; adres/not alt dokümanda.)
+      allow read: if request.auth != null;
 
       // --- TALEP OLUŞTURMA ---
       // Zorunlu alanlar var mı, tipler doğru mu, miktar makul mü?
       // (Bozuk veri girip arayüzü çökertmeyi engeller.)
-      allow create: if request.resource.data.keys().hasAll(
-                        ['userId', 'wasteTypes', 'estimatedKg', 'location', 'status']
+      //
+      // KRİTİK: 'note' ve 'location' anahtarları ana dokümanda YASAK.
+      // Böylece ileride biri kodda yanlışlıkla açık adresi buraya yazmaya
+      // kalkarsa yazma sunucuda reddedilir — gizlilik, koda değil kurala
+      // dayanır.
+      allow create: if request.auth != null
+                    && request.auth.uid == request.resource.data.userId
+                    && request.resource.data.keys().hasAll(
+                        ['userId', 'wasteTypes', 'estimatedKg', 'approxLocation', 'status']
                       )
+                    && !request.resource.data.keys().hasAny(['note', 'location'])
                     && request.resource.data.status == 'bekliyor'
-                    && request.resource.data.location is latlng
+                    && request.resource.data.approxLocation is latlng
                     && request.resource.data.wasteTypes is list
                     && request.resource.data.wasteTypes.size() > 0
                     && request.resource.data.estimatedKg is number
@@ -52,7 +74,8 @@ service cloud.firestore {
       // userId, location, wasteTypes, estimatedKg, note, createdAt
       // DEĞİŞTİRİLEMEZ — yani kimse başkasının talebinin adresini veya
       // miktarını sonradan çarpıtamaz.
-      allow update: if request.resource.data.diff(resource.data)
+      allow update: if request.auth != null
+                    && request.resource.data.diff(resource.data)
                        .affectedKeys()
                        .hasOnly([
                          'status',
@@ -67,6 +90,40 @@ service cloud.firestore {
       // Uygulama hiçbir yerde silme yapmıyor; bu yüzden tamamen kapalı.
       // Linki alan biri koleksiyonu boşaltamaz.
       allow delete: if false;
+
+      // =================================================================
+      // HASSAS DETAY: tam koordinat + kullanıcı notu
+      // =================================================================
+      // Bu alt doküman, gizlilik maskesinin ASIL uygulandığı yerdir.
+      match /private/{detailId} {
+
+        // --- OKUMA ---
+        // İki kişi okuyabilir:
+        //   1. Talebin sahibi          → ownerId alanından (ucuz, get yok)
+        //   2. Atanmış toplayıcı       → üst dokümandaki collectorId'den
+        // Toplayıcı "Talebi Al" transaction'ını kazanana kadar collectorId
+        // boştur; yani maske tam da o anda, sunucuda kalkar.
+        allow read: if request.auth != null
+                    && (
+                         request.auth.uid == resource.data.ownerId
+                         || request.auth.uid == get(
+                              /databases/$(database)/documents/waste_requests/$(requestId)
+                            ).data.collectorId
+                       );
+
+        // --- OLUŞTURMA ---
+        // Yalnızca kendi adına: ownerId kendi UID'in olmak zorunda.
+        // (Üst doküman aynı batch'te oluştuğu için burada get() ile ona
+        //  bakamayız — bu yüzden doğrulama ownerId üzerinden yapılır.)
+        allow create: if request.auth != null
+                      && request.auth.uid == request.resource.data.ownerId
+                      && request.resource.data.exactLocation is latlng;
+
+        // Adres ve not sonradan DEĞİŞTİRİLEMEZ ve SİLİNEMEZ:
+        // toplayıcı yola çıktıktan sonra adresin altının oyulması,
+        // teslimat kaydının geçmişe dönük çarpıtılması engellenir.
+        allow update, delete: if false;
+      }
     }
 
     // --- DİĞER TÜM KOLEKSİYONLAR ---

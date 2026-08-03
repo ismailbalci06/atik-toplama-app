@@ -47,7 +47,10 @@ class _UserMapScreenState extends ConsumerState<UserMapScreen> {
       final types = r.wasteTypes.map((t) => t.label).join(', ');
       return Marker(
         markerId: MarkerId(r.id),
-        position: r.location,
+        // Kendi ekranimiz ama yine de acik dokumandaki yaklasik konumu
+        // kullaniyoruz: tam koordinat icin ekstra bir korumali okuma
+        // gerekirdi ve kullanici zaten kendi adresini biliyor.
+        position: r.approxLocation,
         icon: BitmapDescriptor.defaultMarkerWithHue(BitmapDescriptor.hueGreen),
         infoWindow: InfoWindow(
           title: 'Toplama Talebi',
@@ -66,20 +69,26 @@ class _UserMapScreenState extends ConsumerState<UserMapScreen> {
   ///    talebin durumunu Firestore'dan dinler; toplayici talebi alinca
   ///    ekran otomatik "yolda" animasyonuna gecer
   Future<void> _openRequestSheet(LatLng userLocation) async {
-    final draft = await showWasteRequestSheet(
+    final input = await showWasteRequestSheet(
       context,
       location: userLocation,
-      userId: ref.read(currentUserIdProvider),
     );
 
     // Kullanici sheet'i kapattiysa (iptal) hicbir sey yapma
-    if (draft == null || !mounted) return;
+    if (input == null || !mounted) return;
+
+    final userId = ref.read(currentUserIdProvider);
 
     // --- Talebi Firestore'a yaz ---
+    // Repository iki dokuman yazar: acik ozet + korumali adres detayi.
+    // Tam koordinatin acik dokumana sizmasi burada degil, repository'de
+    // (ve Firestore kuralinda) engellenir.
     final String docId;
     try {
-      docId =
-          await ref.read(wasteRequestRepositoryProvider).addRequest(draft);
+      docId = await ref.read(wasteRequestRepositoryProvider).addRequest(
+            input: input,
+            userId: userId,
+          );
     } catch (e) {
       // GUVENLI yakalama: hatayi ham nesne olarak degil, readableError ile
       // string'e cevirerek kullan (Flutter Web tip cokmesini onler + asil
@@ -99,15 +108,16 @@ class _UserMapScreenState extends ConsumerState<UserMapScreen> {
     if (!mounted) return;
 
     // Takip ekrani dokumani ID ile dinleyecegi icin, talebi
-    // Firestore'un verdigi GERCEK ID ile yeniden olusturuyoruz
+    // Firestore'un verdigi GERCEK ID ile yeniden olusturuyoruz.
+    // Tam koordinati buraya koymuyoruz: takip ekrani onu korumali detay
+    // dokumanindan (sahibi oldugu icin yetkili) kendisi okur.
     final request = WasteRequest(
       id: docId,
-      userId: draft.userId,
-      wasteTypes: draft.wasteTypes,
-      estimatedKg: draft.estimatedKg,
-      note: draft.note,
-      location: draft.location,
-      createdAt: draft.createdAt,
+      userId: userId,
+      wasteTypes: input.wasteTypes,
+      estimatedKg: input.estimatedKg,
+      approxLocation: snapToPrivacyGrid(input.exactLocation),
+      createdAt: DateTime.now(),
     );
 
     // NOT: Pin'i burada ELLE eklemiyoruz — talep Firestore'a yazildigi anda
