@@ -1,5 +1,6 @@
 import '../../impact/domain/impact_stats.dart';
 import '../../waste_request/domain/models/waste_request_model.dart';
+import 'reward_models.dart';
 
 /// ATOS Yesil Puan ekonomisi.
 ///
@@ -129,4 +130,28 @@ class PointsWallet {
 
   /// Kazanilan puana gore tesis seviyesi
   FacilityTier get tier => FacilityTier.forPoints(earned);
+
+  /// Bir kullanicinin talepleri ve odul taleplerinden cuzdanini hesaplar.
+  ///
+  /// TEK YERDE olmasi kritik: kullanicinin kendi ekraninda gordugu bakiye
+  /// ile operatorun onay ekraninda gordugu bakiye AYNI hesaptan gelir.
+  /// Iki ayri formul olsaydi operator "bakiyesi yetiyor" deyip onaylarken
+  /// kullanici farkli bir sayi goruyor olabilirdi.
+  static PointsWallet compute({
+    required List<WasteRequest> requests,
+    required List<Redemption> redemptions,
+  }) {
+    final completed = requests
+        .where((r) => r.status == RequestStatus.tamamlandi)
+        .toList();
+
+    return PointsWallet(
+      earned: GreenPoints.earned(completed),
+      spent: redemptions
+          .where((r) => r.status.holdsPoints)
+          .fold<int>(0, (sum, r) => sum + r.costPoints),
+      confirmedDeliveries:
+          completed.where((r) => GreenPoints.forRequest(r) > 0).length,
+    );
+  }
 }

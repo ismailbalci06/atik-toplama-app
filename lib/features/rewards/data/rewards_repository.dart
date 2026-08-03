@@ -14,12 +14,31 @@ class RewardsRepository {
 
   static const _rewardsCollection = 'rewards';
   static const _redemptionsCollection = 'redemptions';
+  static const _adminsCollection = 'admins';
 
   CollectionReference<Map<String, dynamic>> get _rewards =>
       _firestore.collection(_rewardsCollection);
 
   CollectionReference<Map<String, dynamic>> get _redemptions =>
       _firestore.collection(_redemptionsCollection);
+
+  /// Kullanici OPERATOR mu?
+  ///
+  /// Yetki, `admins/{uid}` dokumaninin VARLIGINDAN gelir. Bu koleksiyona
+  /// uygulamadan yazilamaz (kural: write false) — operator yetkisi yalnizca
+  /// Firebase Console'dan, yonetici yetkisiyle verilir. Yani kimse kendini
+  /// operator yapamaz.
+  Stream<bool> watchIsAdmin(String uid) {
+    if (uid.isEmpty) return Stream.value(false);
+    return _firestore
+        .collection(_adminsCollection)
+        .doc(uid)
+        .snapshots()
+        .map((doc) => doc.exists)
+        // Yetkisi olmayan kullanici kendi admin dokumanini okuyabilir
+        // (kural buna izin verir) ama dokuman yoksa false doner.
+        .handleError((Object _) => false);
+  }
 
   /// Odul katalogunun canli akisi.
   ///
@@ -60,12 +79,14 @@ class RewardsRepository {
   /// son onay ise operatordedir (bkz. RedemptionStatus aciklamasi).
   Future<String> requestRedemption({
     required String userId,
+    required String userName,
     required Reward reward,
   }) async {
     final doc = await _redemptions.add({
       ...Redemption(
         id: '',
         userId: userId,
+        userName: userName,
         rewardId: reward.id,
         rewardTitle: reward.title,
         costPoints: reward.costPoints,
@@ -75,5 +96,51 @@ class RewardsRepository {
       'createdAt': FieldValue.serverTimestamp(),
     });
     return doc.id;
+  }
+
+  // ---------------------------------------------------------------
+  // OPERATOR ISLEMLERI (yalnizca admins/{uid} olan kullanicilar)
+  // ---------------------------------------------------------------
+
+  /// ONAY BEKLEYEN tum odul talepleri (en eski once — sirayla islensin).
+  ///
+  /// Yetkisi olmayan biri bu akisi dinlerse Firestore permission-denied
+  /// dondurur; yani liste arayuzde gizlenmiyor, sunucuda kapali.
+  Stream<List<Redemption>> watchPendingRedemptions() {
+    return _redemptions
+        .where('status', isEqualTo: RedemptionStatus.beklemede.name)
+        .snapshots()
+        .map((snap) {
+      // Siralama istemcide: status filtresi + createdAt siralamasi
+      // bilesik indeks gerektirirdi (bkz. ayni gerekce waste_requests'te).
+      final list = snap.docs.map(Redemption.fromDoc).toList()
+        ..sort((a, b) => a.createdAt.compareTo(b.createdAt));
+      return list;
+    });
+  }
+
+  /// Bir kullanicinin odul taleplerini operator icin okur.
+  /// (Bakiye hesabinda kullanilir — kullanicinin gordugu ile ayni veri.)
+  Stream<List<Redemption>> watchRedemptionsOf(String userId) =>
+      watchUserRedemptions(userId);
+
+  /// Talebi ONAYLAR veya REDDEDER.
+  ///
+  /// Kural yalnizca [status], [decidedAt] ve [decidedBy] alanlarinin
+  /// degismesine izin verir: operator puani, kullaniciyi veya odulun
+  /// fiyatini degistiremez. Ayrica sadece 'beklemede' durumundaki bir kayit
+  /// karara baglanabilir — verilmis bir karar sonradan cevrilemez.
+  Future<void> decideRedemption({
+    required String redemptionId,
+    required bool approve,
+    required String operatorId,
+  }) {
+    return _redemptions.doc(redemptionId).update({
+      'status': approve
+          ? RedemptionStatus.onaylandi.name
+          : RedemptionStatus.reddedildi.name,
+      'decidedAt': FieldValue.serverTimestamp(),
+      'decidedBy': operatorId,
+    });
   }
 }

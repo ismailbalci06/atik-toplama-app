@@ -38,6 +38,25 @@ rules_version = '2';
 service cloud.firestore {
   match /databases/{database}/documents {
 
+    // OPERATÖR (yönetici) mi?
+    //
+    // Yetki, `admins/{uid}` dokümanının VARLIĞINDAN gelir. O koleksiyona
+    // uygulamadan yazılamaz; operatör yetkisi yalnızca Firebase Console'dan
+    // verilir. Yani kimse kendini operatör ilan edemez.
+    function isAdmin() {
+      return request.auth != null
+             && exists(/databases/$(database)/documents/admins/$(request.auth.uid));
+    }
+
+    // --- OPERATÖR LİSTESİ ---
+    // Kullanıcı yalnızca KENDİ admin kaydını okuyabilir (uygulama "ben
+    // operatör müyüm?" diye sorabilsin diye). Başkasınınkini göremez,
+    // yani operatörlerin kim olduğu dışarıya sızmaz.
+    match /admins/{adminId} {
+      allow read: if request.auth != null && request.auth.uid == adminId;
+      allow write: if false;
+    }
+
     match /waste_requests/{requestId} {
 
       // --- OKUMA ---
@@ -156,8 +175,9 @@ service cloud.firestore {
     // eline geçen tek şey reddedilecek bir kayıttır.
     // (Faz 2: Cloud Functions ile sunucu tarafı otomatik onay.)
     match /redemptions/{redemptionId} {
+      // Kendi talebini herkes görür; TÜM talepleri yalnızca operatör görür.
       allow read: if request.auth != null
-                  && request.auth.uid == resource.data.userId;
+                  && (request.auth.uid == resource.data.userId || isAdmin());
 
       allow create: if request.auth != null
                     && request.auth.uid == request.resource.data.userId
@@ -166,9 +186,21 @@ service cloud.firestore {
                     && request.resource.data.costPoints > 0
                     && request.resource.data.rewardId is string;
 
-      // Onay/red YALNIZCA Console'dan (yönetici) yapılır: kullanıcı kendi
-      // talebini onaylanmış gösteremez, silip izini kaybettiremez.
-      allow update, delete: if false;
+      // --- ONAY / RED ---
+      // Yalnızca operatör ve YALNIZCA şu üç alan: kullanıcıyı, ödülü veya
+      // puanı değiştiremez — muhasebe bütünlüğü korunur.
+      // Ayrıca sadece 'beklemede' bir kayıt karara bağlanabilir: verilmiş
+      // bir karar sonradan çevrilemez, kararı veren de izini silemez.
+      allow update: if isAdmin()
+                    && resource.data.status == 'beklemede'
+                    && request.resource.data.status in ['onaylandi', 'reddedildi']
+                    && request.resource.data.decidedBy == request.auth.uid
+                    && request.resource.data.diff(resource.data)
+                         .affectedKeys()
+                         .hasOnly(['status', 'decidedAt', 'decidedBy']);
+
+      // Kayıt silme tamamen kapalı: ödül geçmişi yok edilemez.
+      allow delete: if false;
     }
 
     // --- DİĞER TÜM KOLEKSİYONLAR ---

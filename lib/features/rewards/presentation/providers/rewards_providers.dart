@@ -34,26 +34,51 @@ final userRedemptionsProvider =
 /// toplayici teslimati onayladigi an bakiye artar.
 final pointsWalletProvider = Provider.autoDispose<PointsWallet>((ref) {
   final userId = ref.watch(currentUserIdProvider);
-  final requests =
-      ref.watch(userRequestsProvider(userId)).valueOrNull ??
-          const <WasteRequest>[];
-  final redemptions =
-      ref.watch(userRedemptionsProvider).valueOrNull ?? const <Redemption>[];
-
-  final completed = requests
-      .where((r) => r.status == RequestStatus.tamamlandi)
-      .toList();
-
-  final earned = GreenPoints.earned(completed);
-  final spent = redemptions
-      .where((r) => r.status.holdsPoints)
-      .fold<int>(0, (sum, r) => sum + r.costPoints);
-
-  return PointsWallet(
-    earned: earned,
-    spent: spent,
-    // Yalnizca PUAN URETEN teslimatlar sayilir (onayli olanlar)
-    confirmedDeliveries:
-        completed.where((r) => GreenPoints.forRequest(r) > 0).length,
+  return PointsWallet.compute(
+    requests: ref.watch(userRequestsProvider(userId)).valueOrNull ??
+        const <WasteRequest>[],
+    redemptions:
+        ref.watch(userRedemptionsProvider).valueOrNull ?? const <Redemption>[],
   );
+});
+
+/// -----------------------------------------------------------------
+/// OPERATOR (yonetici) tarafi
+/// -----------------------------------------------------------------
+
+/// Oturum acan kullanici OPERATOR mu?
+///
+/// Yetki `admins/{uid}` dokumaninin varligindan gelir ve o koleksiyona
+/// uygulamadan yazilamaz. Bu provider yalnizca ARAYUZU acar/kapatir;
+/// gercek koruma Firestore kuralindadir — biri arayuzu zorlasa bile
+/// okuma/yazma sunucuda reddedilir.
+final isAdminProvider = StreamProvider.autoDispose<bool>((ref) {
+  final uid = ref.watch(currentUserIdProvider);
+  return ref.watch(rewardsRepositoryProvider).watchIsAdmin(uid);
+});
+
+/// Onay bekleyen TUM odul talepleri (yalnizca operator okuyabilir).
+final pendingRedemptionsProvider =
+    StreamProvider.autoDispose<List<Redemption>>((ref) {
+  return ref.watch(rewardsRepositoryProvider).watchPendingRedemptions();
+});
+
+/// Belirli bir KULLANICININ cuzdani — operator onay verirken bakiyesini
+/// gorebilsin diye. Kullanicinin kendi ekraninda gordugu hesabin AYNISI
+/// (ikisi de PointsWallet.compute kullanir).
+final walletOfUserProvider =
+    Provider.autoDispose.family<PointsWallet, String>((ref, userId) {
+  final requests = ref.watch(userRequestsProvider(userId)).valueOrNull ??
+      const <WasteRequest>[];
+  final redemptions = ref
+          .watch(redemptionsOfUserProvider(userId))
+          .valueOrNull ??
+      const <Redemption>[];
+  return PointsWallet.compute(requests: requests, redemptions: redemptions);
+});
+
+/// Bir kullanicinin odul talepleri (operator gorunumu icin family).
+final redemptionsOfUserProvider = StreamProvider.autoDispose
+    .family<List<Redemption>, String>((ref, userId) {
+  return ref.watch(rewardsRepositoryProvider).watchRedemptionsOf(userId);
 });

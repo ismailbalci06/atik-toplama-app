@@ -146,6 +146,8 @@ class RewardsScreen extends ConsumerWidget {
     try {
       await ref.read(rewardsRepositoryProvider).requestRedemption(
             userId: ref.read(currentUserIdProvider),
+            // Operator panelinde ham UID yerine tesis adi gorunsun
+            userName: ref.read(currentUserNameProvider),
             reward: reward,
           );
       if (context.mounted) {

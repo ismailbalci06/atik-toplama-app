@@ -8,6 +8,8 @@ import '../../../../core/widgets/impact_dashboard.dart';
 import '../../../../core/widgets/scope_badge.dart';
 import '../../../collector/presentation/screens/collector_map_screen.dart';
 import '../../../impact/presentation/providers/impact_providers.dart';
+import '../../../rewards/presentation/providers/rewards_providers.dart';
+import '../../../rewards/presentation/screens/operator_screen.dart';
 import '../../../shell/presentation/screens/main_shell.dart';
 
 /// Rol secim ekrani — uygulamanin giris noktasi.
@@ -97,6 +99,27 @@ class RoleSelectScreen extends ConsumerWidget {
                     'Bölgenizdeki talepleri görün, alın ve rotanızı oluşturun',
                 onTap: () => _goTo(context, const CollectorMapScreen()),
               ),
+
+              // --- Operator karti: YALNIZCA yetkili hesapta gorunur ---
+              // Yetki `admins/{uid}` dokumanindan gelir. Bu kart sadece
+              // arayuzu acar; yetkisiz biri ekrani zorlasa bile Firestore
+              // kurallari okuma/yazmayi reddeder.
+              ...ref.watch(isAdminProvider).maybeWhen(
+                    data: (isAdmin) => isAdmin
+                        ? [
+                            const SizedBox(height: 12),
+                            _RoleCard(
+                              icon: Icons.admin_panel_settings_outlined,
+                              title: 'Operatör (ATOS Yönetim)',
+                              subtitle:
+                                  'Ödül taleplerini onaylayın veya reddedin',
+                              onTap: () =>
+                                  _goTo(context, const OperatorScreen()),
+                            ),
+                          ]
+                        : const <Widget>[],
+                    orElse: () => const <Widget>[],
+                  ),
             ],
           ),
         ),
