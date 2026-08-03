@@ -43,3 +43,9 @@ app.*.map.json
 /android/app/debug
 /android/app/profile
 /android/app/release
+
+# Google Maps API anahtari — ASLA depoya girmez (bkz. tool/build_web.sh)
+.maps_api_key
+
+# Firebase CLI deploy onbellegi
+.firebase/

@@ -32,8 +32,18 @@
   <title>ATOS · Atık Toplama Sistemi</title>
   <link rel="manifest" href="manifest.json">
 
-  <!-- Google Maps JavaScript API (google_maps_flutter_web icin gerekli) -->
-  <script src="https://maps.googleapis.com/maps/api/js?key=__MAPS_API_KEY_REDACTED__"></script>
+  <!--
+    Google Maps JavaScript API (google_maps_flutter_web icin gerekli).
+
+    Anahtar KAYNAK KODDA TUTULMAZ: asagidaki yer tutucu, derleme sirasinda
+    `tool/build_web.sh` tarafindan gercek anahtarla degistirilir. Anahtar
+    `.maps_api_key` dosyasindan (veya MAPS_API_KEY ortam degiskeninden) gelir
+    ve bu dosya .gitignore'dadir.
+
+    DIKKAT: Duz `flutter build web` calistirmayin — yer tutucu yerinde kalir
+    ve harita "InvalidKey" hatasi verir. Her zaman: ./tool/build_web.sh
+  -->
+  <script src="https://maps.googleapis.com/maps/api/js?key=__MAPS_API_KEY__"></script>
 </head>
 <body>
   <!--
