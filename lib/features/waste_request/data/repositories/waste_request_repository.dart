@@ -172,6 +172,21 @@ class WasteRequestRepository {
     return _requests.doc(requestId).update({'status': status.name});
   }
 
+  /// Teslimati TAMAMLAR ve toplayicinin onayladigi gercek miktari yazar.
+  ///
+  /// Durum ve onayli miktar TEK yazmada gider: "tamamlandi ama miktari yok"
+  /// gibi bir ara durum olusamaz. Yesil Puan yalnizca [confirmedKg] uzerinden
+  /// hesaplandigi icin bu alanin eksik kalmasi puan kaybi demek olurdu.
+  Future<void> completeRequest({
+    required String requestId,
+    required double confirmedKg,
+  }) {
+    return _requests.doc(requestId).update({
+      'status': RequestStatus.tamamlandi.name,
+      'confirmedKg': confirmedKg,
+    });
+  }
+
   // ---------------------------------------------------------------
   // CANLI OKUMA (STREAM) ISLEMLERI
   // ---------------------------------------------------------------

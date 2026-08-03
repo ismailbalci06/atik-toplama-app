@@ -149,7 +149,22 @@ class WasteRequest {
   final String id;                  // Benzersiz talep ID'si (dokuman ID)
   final String userId;              // Talebi olusturan kullanicinin ID'si
   final List<WasteType> wasteTypes; // Secilen atik turleri (coklu secim)
-  final double estimatedKg;         // Tahmini agirlik (kg)
+  final double estimatedKg;         // Tahmini agirlik (kg) — KULLANICI BEYANI
+
+  /// Toplayicinin teslim alirken ONAYLADIGI gercek miktar (kg).
+  ///
+  /// NEDEN VAR: [estimatedKg] kullanicinin kendi beyanidir. Yesil Puan
+  /// ekonomisi beyan uzerine kurulsaydi, kullanici miktari sisirip puan
+  /// uretebilirdi. Bu yuzden PUAN YALNIZCA bu alandan hesaplanir; alan
+  /// sadece teslimati yapan toplayici tarafindan doldurulur.
+  ///
+  /// Teslimat tamamlanana kadar null'dir.
+  final double? confirmedKg;
+
+  /// Puana ve etkiye esas alinacak miktar.
+  /// Onaylanmis kilo varsa o, yoksa beyan (yalnizca ETKI tahmininde
+  /// kullanilir — puan hesabi onaysiz teslimati hic saymaz).
+  double get effectiveKg => confirmedKg ?? estimatedKg;
 
   /// YAKLASIK toplama konumu (~500 m izgaraya yuvarlanmis).
   /// Herkese aciktir; tam koordinat icin [RequestDetail] gerekir.
@@ -181,6 +196,7 @@ class WasteRequest {
     required this.estimatedKg,
     required this.approxLocation,
     required this.createdAt,
+    this.confirmedKg,
     this.status = RequestStatus.bekliyor,
     this.collectorId,
     this.acceptedAt,
@@ -202,6 +218,7 @@ class WasteRequest {
       'userId': userId,
       'wasteTypes': wasteTypes.map((t) => t.name).toList(),
       'estimatedKg': estimatedKg,
+      'confirmedKg': confirmedKg,
       'approxLocation':
           GeoPoint(approxLocation.latitude, approxLocation.longitude),
       'status': status.name,
@@ -243,6 +260,7 @@ class WasteRequest {
           .map((name) => WasteType.fromName(name as String))
           .toList(),
       estimatedKg: (json['estimatedKg'] as num? ?? 0).toDouble(),
+      confirmedKg: (json['confirmedKg'] as num?)?.toDouble(),
       approxLocation: approx,
       status: RequestStatus.fromName(json['status'] as String?),
       createdAt:
@@ -276,6 +294,7 @@ class WasteRequest {
       userId: userId,
       wasteTypes: wasteTypes,
       estimatedKg: estimatedKg,
+      confirmedKg: confirmedKg,
       approxLocation: approxLocation,
       createdAt: createdAt,
       status: status ?? this.status,

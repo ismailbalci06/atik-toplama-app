@@ -14,6 +14,7 @@ import '../../../auth/presentation/providers/auth_providers.dart';
 import '../../../waste_request/domain/models/waste_request_model.dart';
 import '../../../waste_request/presentation/providers/waste_request_providers.dart';
 import '../widgets/arrival_celebration_dialog.dart';
+import '../widgets/confirm_weight_dialog.dart';
 import '../widgets/request_detail_sheet.dart';
 
 // NOT: Toplayici kimligi artik sabit degil — giris yapan kullanicinin
@@ -160,26 +161,35 @@ class _CollectorMapScreenState extends ConsumerState<CollectorMapScreen>
     final arrivedRequest = _activeRequest;
     if (arrivedRequest == null) return;
 
+    // --- MIKTAR ONAYI ---
+    // Teslimat 'tamamlandi' olmadan ONCE toplayici gercek miktari onaylar.
+    // Musterinin Yesil Puani yalnizca bu degerden dogar; beyan puan uretmez.
+    final confirmedKg = await showConfirmWeightDialog(
+      context,
+      request: arrivedRequest,
+    );
+    // Diyalog kapatilamaz (barrierDismissible: false); yine de savunmaci ol
+    if (confirmedKg == null || !mounted) return;
+
     setState(() {
       _polylines.clear();
       _activeRequest = null;
       _activeDestination = null; // teslimat bitti -> adres yeniden gizlenir
+      _activeDetail = null;
       _activeRoutePoints = [];
-      // Oturum ozetini guncelle (bellekte; ekstra sorgu/yazma yok)
-      _sessionKg += arrivedRequest.estimatedKg;
+      // Oturum ozeti ONAYLANAN miktardan hesaplanir (beyandan degil)
+      _sessionKg += confirmedKg;
       _sessionCount++;
     });
 
     try {
-      await ref
-          .read(wasteRequestRepositoryProvider)
-          .updateStatus(
+      await ref.read(wasteRequestRepositoryProvider).completeRequest(
             requestId: arrivedRequest.id,
-            status: RequestStatus.tamamlandi,
+            confirmedKg: confirmedKg,
           );
     } catch (e) {
       // Yazma basarisiz olsa bile demo akisini kesme; sadece guvenli bildir
-      final message = logAndReadError(e, context: 'updateStatus');
+      final message = logAndReadError(e, context: 'completeRequest');
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(content: Text('Durum güncellenemedi: $message')),

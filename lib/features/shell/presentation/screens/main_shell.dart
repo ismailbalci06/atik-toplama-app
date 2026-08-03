@@ -5,6 +5,7 @@ import '../../../../core/theme/app_theme.dart';
 import '../../../dashboard/presentation/screens/dashboard_screen.dart';
 import '../../../profile/presentation/screens/profile_screen.dart';
 import '../../../reports/presentation/screens/reports_screen.dart';
+import '../../../rewards/presentation/screens/rewards_screen.dart';
 import '../../../waste_request/presentation/screens/request_history_screen.dart';
 
 /// "Atık Üreten" (isletme/site) tarafinin ana kabugu.
@@ -26,6 +27,7 @@ class _MainShellState extends State<MainShell> {
   static const _tabs = <Widget>[
     DashboardScreen(),
     RequestHistoryScreen(embedded: true),
+    RewardsScreen(embedded: true),
     ReportsScreen(),
     ProfileScreen(),
   ];
@@ -58,6 +60,11 @@ class _MainShellState extends State<MainShell> {
                 icon: Icon(Icons.receipt_long_outlined),
                 activeIcon: Icon(Icons.receipt_long),
                 label: 'Talepler',
+              ),
+              BottomNavigationBarItem(
+                icon: Icon(Icons.card_giftcard_outlined),
+                activeIcon: Icon(Icons.card_giftcard_rounded),
+                label: 'Ödüller',
               ),
               BottomNavigationBarItem(
                 icon: Icon(Icons.bar_chart_outlined),

@@ -83,7 +83,12 @@ service cloud.firestore {
                          'acceptedAt',
                          'collectorLocation',
                          'collectorBearing',
-                         'collectorName'
+                         'collectorName',
+                         // Toplayicinin teslim alirken onayladigi gercek
+                         // miktar. Yesil Puan YALNIZCA bundan hesaplanir;
+                         // kullanicinin beyani (estimatedKg) bu listede
+                         // OLMADIGI icin sonradan degistirilemez.
+                         'confirmedKg'
                        ]);
 
       // --- SİLME ---
@@ -124,6 +129,46 @@ service cloud.firestore {
         // teslimat kaydının geçmişe dönük çarpıtılması engellenir.
         allow update, delete: if false;
       }
+    }
+
+    // =====================================================================
+    // ÖDÜL MARKETİ
+    // =====================================================================
+
+    // --- ÖDÜL KATALOĞU ---
+    // Uygulama katalogu SADECE OKUR. Yazma tamamen kapalı: aksi halde
+    // herkes kendine "0 puanlık" ödül tanımlayabilirdi. Katalog Firebase
+    // Console'dan (yönetici yetkisiyle) yönetilir.
+    match /rewards/{rewardId} {
+      allow read: if request.auth != null;
+      allow write: if false;
+    }
+
+    // --- ÖDÜL TALEPLERİ ---
+    // Kullanıcı yalnızca KENDİ taleplerini görür ve yalnızca KENDİ adına
+    // talep oluşturabilir.
+    //
+    // NEDEN OTOMATİK ONAY YOK: Firestore kuralları "bu kullanıcının
+    // bakiyesi yetiyor mu?" sorusunu cevaplayamaz — bu, tüm teslimatların
+    // toplanmasını gerektirir ve kurallar toplam hesabı yapamaz. Bu yüzden
+    // talep 'beklemede' olarak düşer, ATOS operatörü Console'dan onaylar.
+    // Bakiyesini aşan bir talep oluşturan biri hiçbir şey kazanmaz;
+    // eline geçen tek şey reddedilecek bir kayıttır.
+    // (Faz 2: Cloud Functions ile sunucu tarafı otomatik onay.)
+    match /redemptions/{redemptionId} {
+      allow read: if request.auth != null
+                  && request.auth.uid == resource.data.userId;
+
+      allow create: if request.auth != null
+                    && request.auth.uid == request.resource.data.userId
+                    && request.resource.data.status == 'beklemede'
+                    && request.resource.data.costPoints is number
+                    && request.resource.data.costPoints > 0
+                    && request.resource.data.rewardId is string;
+
+      // Onay/red YALNIZCA Console'dan (yönetici) yapılır: kullanıcı kendi
+      // talebini onaylanmış gösteremez, silip izini kaybettiremez.
+      allow update, delete: if false;
     }
 
     // --- DİĞER TÜM KOLEKSİYONLAR ---
