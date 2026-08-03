@@ -38,6 +38,21 @@ enum RequestStatus {
   /// Firestore'dan gelen string'i guvenli sekilde enum'a cevirir.
   static RequestStatus fromName(String? name) =>
       RequestStatus.values.asNameMap()[name ?? ''] ?? RequestStatus.bekliyor;
+
+  /// Talep hala AKTIF mi? (kullanici tarafinda canli takip edilebilir)
+  ///
+  /// Tek yerde tanimli olmasi onemli: Ana Sayfa sayaci, gecmis listesindeki
+  /// tiklanabilirlik ve haritadaki pin'ler ayni tanimi kullanir; biri
+  /// degisirse hepsi birlikte degisir.
+  bool get isActive =>
+      this == RequestStatus.bekliyor ||
+      this == RequestStatus.atandi ||
+      this == RequestStatus.yolda;
+
+  /// Talep henuz bir toplayici tarafindan alinmadi mi?
+  /// Iptal YALNIZCA bu durumda mumkundur — arac yola ciktiktan sonra
+  /// iptal, toplayicinin bosuna yol gitmesi demektir.
+  bool get isCancellable => this == RequestStatus.bekliyor;
 }
 
 /// Bir atik toplama talebini temsil eden model sinifi.

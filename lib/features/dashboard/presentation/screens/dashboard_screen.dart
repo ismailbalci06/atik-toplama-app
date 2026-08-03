@@ -9,6 +9,7 @@ import '../../../auth/presentation/providers/auth_providers.dart';
 import '../../../impact/domain/impact_stats.dart';
 import '../../../waste_request/domain/models/waste_request_model.dart';
 import '../../../waste_request/presentation/providers/waste_request_providers.dart';
+import '../../../waste_request/presentation/screens/request_tracking_screen.dart';
 import '../../../waste_request/presentation/screens/user_map_screen.dart';
 import '../../../waste_request/presentation/widgets/request_tile.dart';
 
@@ -31,12 +32,11 @@ class DashboardScreen extends ConsumerWidget {
     final loading = requestsAsync.isLoading;
 
     // --- Gercek veriden turetilen ozetler ---
-    final active = requests
-        .where((r) =>
-            r.status == RequestStatus.bekliyor ||
-            r.status == RequestStatus.atandi ||
-            r.status == RequestStatus.yolda)
-        .length;
+    // Aktif talepler: liste (en yenisi basta) — hem sayac hem "devam et"
+    // kisayolu ayni kaynagi kullanir.
+    final activeRequests =
+        requests.where((r) => r.status.isActive).toList();
+    final active = activeRequests.length;
 
     final completed =
         requests.where((r) => r.status == RequestStatus.tamamlandi).toList();
@@ -75,14 +75,20 @@ class DashboardScreen extends ConsumerWidget {
             // --- Karsilama ---
             Text('Merhaba, $name 👋', style: text.headlineSmall),
             const SizedBox(height: 4),
-            Text(
-              loading
-                  ? 'Talepleriniz yükleniyor…'
-                  : active > 0
-                      ? 'Bugün $active aktif talebiniz var.'
-                      : 'Şu an aktif talebiniz yok.',
-              style: text.bodySmall,
-            ),
+            if (loading || active == 0)
+              Text(
+                loading
+                    ? 'Talepleriniz yükleniyor…'
+                    : 'Şu an aktif talebiniz yok.',
+                style: text.bodySmall,
+              )
+            else
+              // Aktif talep varsa bu satir CANLI TAKIBE kisayoldur:
+              // takip ekranindan cikan kullanici talebine buradan doner.
+              _ActiveRequestLink(
+                count: active,
+                onTap: () => openTracking(context, activeRequests.first),
+              ),
             const SizedBox(height: 20),
 
             // --- Kisisel etki basligi ---
@@ -190,7 +196,13 @@ class DashboardScreen extends ConsumerWidget {
               ...requests.take(3).map(
                     (r) => Padding(
                       padding: const EdgeInsets.only(bottom: 10),
-                      child: RequestTile(request: r),
+                      child: RequestTile(
+                        request: r,
+                        // Aktif talep -> canli takip; gecmis talep -> pasif
+                        onTap: r.status.isActive
+                            ? () => openTracking(context, r)
+                            : null,
+                      ),
                     ),
                   ),
           ],
@@ -223,6 +235,49 @@ class DashboardScreen extends ConsumerWidget {
       // Oturumu kapat + provider onbelleklerini temizle + yigini bosalt
       await signOutAndReset(context, ref);
     }
+  }
+}
+
+/// "Bugün N aktif talebiniz var" satiri — canli takibe kisayol.
+///
+/// Gorsel olarak karsilama metninin devami gibi durur (ayni bodySmall
+/// tipografisi), ama yesil renk + ok ile tiklanabilir oldugunu soyler.
+class _ActiveRequestLink extends StatelessWidget {
+  const _ActiveRequestLink({required this.count, required this.onTap});
+
+  final int count;
+  final VoidCallback onTap;
+
+  @override
+  Widget build(BuildContext context) {
+    return InkWell(
+      onTap: onTap,
+      borderRadius: BorderRadius.circular(8),
+      child: Padding(
+        padding: const EdgeInsets.symmetric(vertical: 2),
+        child: Row(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Flexible(
+              child: Text(
+                count == 1
+                    ? 'Bugün 1 aktif talebiniz var · takibe dön'
+                    : 'Bugün $count aktif talebiniz var · takibe dön',
+                maxLines: 1,
+                overflow: TextOverflow.ellipsis,
+                style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                      color: AppColors.primaryDark,
+                      fontWeight: FontWeight.w700,
+                    ),
+              ),
+            ),
+            const SizedBox(width: 2),
+            const Icon(Icons.chevron_right,
+                size: 16, color: AppColors.primaryDark),
+          ],
+        ),
+      ),
+    );
   }
 }
 

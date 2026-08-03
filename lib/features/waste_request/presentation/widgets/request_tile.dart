@@ -72,8 +72,13 @@ class RequestTile extends StatelessWidget {
               const SizedBox(width: 8),
 
               badgeFor(request.status),
-              const Icon(Icons.chevron_right,
-                  color: AppColors.textSecondary, size: 20),
+              // Ok isareti YALNIZCA gercekten tiklanabilirken cizilir;
+              // aksi halde kullaniciya olmayan bir aksiyon vaat ediyorduk.
+              if (onTap != null)
+                const Icon(Icons.chevron_right,
+                    color: AppColors.textSecondary, size: 20)
+              else
+                const SizedBox(width: 20),
             ],
           ),
         ),

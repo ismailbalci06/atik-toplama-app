@@ -18,8 +18,11 @@ import 'request_tracking_screen.dart';
 ///
 /// - Google Maps uzerinde kullanicinin mevcut konumunu gosterir.
 /// - Alt sagdaki buton ile "Atik Talebi Olustur" bottom sheet'i acilir.
-/// - Olusturulan talepler haritaya yesil pin olarak eklenir.
-///   (Sonraki adimda pin ekleme yerine Firestore'a yazilacak.)
+/// - Kullanicinin AKTIF talepleri haritada yesil pin olarak durur.
+///   Pin'ler yerel state'ten DEGIL, Firestore'dan gelir: ekrandan cikip
+///   dondugunde de, baska bir cihazdan bakildiginda da ayni pin'ler
+///   gorunur; talep tamamlaninca/iptal edilince kendiliginden kaybolur.
+///   Pin'e dokunmak canli takip ekranini acar.
 class UserMapScreen extends ConsumerStatefulWidget {
   const UserMapScreen({super.key});
 
@@ -31,12 +34,29 @@ class _UserMapScreenState extends ConsumerState<UserMapScreen> {
   /// Harita controller'i — kamera hareketleri icin kullanilir
   GoogleMapController? _mapController;
 
-  /// Haritada gosterilecek pin'ler (olusturulan talepler)
-  final Set<Marker> _markers = {};
-
   /// Harita olusturuldugunda controller'i sakla
   void _onMapCreated(GoogleMapController controller) {
     _mapController = controller;
+  }
+
+  /// Kullanicinin AKTIF taleplerinden harita pin'lerini uretir.
+  /// Kaynak Firestore oldugu icin liste her degistiginde pin'ler
+  /// kendiliginden guncellenir (elle ekleme/silme yok).
+  Set<Marker> _buildMarkers(List<WasteRequest> requests) {
+    return requests.where((r) => r.status.isActive).map((r) {
+      final types = r.wasteTypes.map((t) => t.label).join(', ');
+      return Marker(
+        markerId: MarkerId(r.id),
+        position: r.location,
+        icon: BitmapDescriptor.defaultMarkerWithHue(BitmapDescriptor.hueGreen),
+        infoWindow: InfoWindow(
+          title: 'Toplama Talebi',
+          snippet: '$types • ~${r.estimatedKg.toStringAsFixed(0)} kg',
+          // Balona dokununca canli takibe don
+          onTap: () => openTracking(context, r),
+        ),
+      );
+    }).toSet();
   }
 
   /// "Talep Olustur" akisini baslatir:
@@ -90,23 +110,9 @@ class _UserMapScreenState extends ConsumerState<UserMapScreen> {
       createdAt: draft.createdAt,
     );
 
-    // Kendi talebini haritada isaretle (takipten donunce gorunur)
-    setState(() {
-      _markers.add(
-        Marker(
-          markerId: MarkerId(request.id),
-          position: request.location,
-          icon: BitmapDescriptor.defaultMarkerWithHue(
-            BitmapDescriptor.hueGreen,
-          ),
-          infoWindow: InfoWindow(
-            title: 'Toplama Talebi',
-            snippet:
-                '${request.wasteTypes.map((t) => t.label).join(", ")} • ~${request.estimatedKg.toStringAsFixed(0)} kg',
-          ),
-        ),
-      );
-    });
+    // NOT: Pin'i burada ELLE eklemiyoruz — talep Firestore'a yazildigi anda
+    // userRequestsProvider akisi yeni listeyi yayinlar ve pin kendiliginden
+    // haritaya duser (tek gercek kaynak Firestore).
 
     ScaffoldMessenger.of(context).showSnackBar(
       const SnackBar(
@@ -131,6 +137,14 @@ class _UserMapScreenState extends ConsumerState<UserMapScreen> {
     // Riverpod uzerinden kullanicinin konumunu izle.
     // AsyncValue sayesinde yukleme / hata / veri durumlarini ayri ayri cizeriz.
     final locationAsync = ref.watch(userLocationProvider);
+
+    // Kullanicinin kendi talepleri — haritadaki pin'lerin CANLI kaynagi.
+    // Repository kurali korunuyor: UI Firestore'a dogrudan dokunmuyor,
+    // provider uzerinden okuyor.
+    final myRequests = ref
+            .watch(userRequestsProvider(ref.watch(currentUserIdProvider)))
+            .valueOrNull ??
+        const <WasteRequest>[];
 
     return Scaffold(
       body: locationAsync.when(
@@ -180,7 +194,7 @@ class _UserMapScreenState extends ConsumerState<UserMapScreen> {
                 target: userLocation,
                 zoom: 15,
               ),
-              markers: _markers,
+              markers: _buildMarkers(myRequests),
               myLocationEnabled: true,        // Mavi "ben buradayim" noktasi
               myLocationButtonEnabled: false, // Kendi butonumuzu kullanacagiz
               zoomControlsEnabled: false,     // Varsayilan zoom butonlarini gizle

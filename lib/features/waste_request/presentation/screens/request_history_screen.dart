@@ -5,6 +5,7 @@ import '../../../../core/constants/app_colors.dart';
 import '../../../auth/presentation/providers/auth_providers.dart';
 import '../providers/waste_request_providers.dart';
 import '../widgets/request_tile.dart';
+import 'request_tracking_screen.dart';
 
 /// 'Taleplerim' — kullanicinin GECMIS taleplerinin canli listesi.
 ///
@@ -46,7 +47,18 @@ class RequestHistoryScreen extends ConsumerWidget {
             padding: const EdgeInsets.fromLTRB(16, 8, 16, 24),
             itemCount: requests.length,
             separatorBuilder: (_, __) => const SizedBox(height: 10),
-            itemBuilder: (_, i) => RequestTile(request: requests[i]),
+            itemBuilder: (context, i) {
+              final r = requests[i];
+              // AKTIF talepler canli takibe acilir; tamamlanmis/iptal
+              // talepler tiklanamaz (RequestTile o zaman ok isaretini de
+              // cizmez, yani tiklanabilirlik gorsel olarak da dogru).
+              return RequestTile(
+                request: r,
+                onTap: r.status.isActive
+                    ? () => openTracking(context, r)
+                    : null,
+              );
+            },
           );
         },
       ),

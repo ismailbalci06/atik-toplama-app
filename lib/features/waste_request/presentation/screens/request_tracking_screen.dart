@@ -5,12 +5,26 @@ import 'package:pointer_interceptor/pointer_interceptor.dart';
 
 import '../../../../core/constants/app_colors.dart';
 import '../../../../core/theme/app_theme.dart';
+import '../../../../core/utils/error_utils.dart';
 import '../../../../core/utils/map_utils.dart';
 import '../../../../core/utils/marker_icons.dart';
 import '../../../../core/widgets/premium_progress_bar.dart';
 import '../../../collector/presentation/widgets/arrival_celebration_dialog.dart';
 import '../../domain/models/waste_request_model.dart';
 import '../providers/waste_request_providers.dart';
+
+/// AKTIF bir talebin canli takip ekranini acar.
+///
+/// Tek giris noktasi olmasi onemli: Ana Sayfa, Taleplerim listesi ve
+/// haritadaki pin'ler ayni yoldan girer. Talep aktif degilse (tamamlandi
+/// veya iptal) hicbir sey yapmaz — gecmis bir talebin "takibi" olmaz.
+Future<void> openTracking(BuildContext context, WasteRequest request) {
+  if (!request.status.isActive) return Future.value();
+  Haptics.tap();
+  return Navigator.of(context).push(
+    MaterialPageRoute(builder: (_) => RequestTrackingScreen(request: request)),
+  );
+}
 
 /// Takip ekraninin gorsel asamalari.
 enum TrackingPhase {
@@ -84,10 +98,34 @@ class _RequestTrackingScreenState extends ConsumerState<RequestTrackingScreen>
   /// Talebi alan toplayicinin GERCEK adi (Firestore'dan canli gelir)
   String? _liveCollectorName;
 
+  /// Iptal istegi surerken butonu kilitler (cift gonderim olmasin)
+  bool _cancelling = false;
+
+  /// Ekran kapanma surecine girdi mi? Firestore'dan ayni durum iki kez
+  /// dusarse iki kez pop() cagrilip ALTTAKI ekranin da kapanmasini onler.
+  bool _leaving = false;
+
   /// Ekranda gosterilecek toplayici adi — yoksa nötr etikete duser
   String get _collectorName {
     final n = _liveCollectorName?.trim();
     return (n == null || n.isEmpty) ? _collectorFallbackName : n;
+  }
+
+  /// Avatardaki bas harfler — GERCEK addan turetilir.
+  /// (Onceden sabit 'AY' yaziyordu: eski "Ahmet Yılmaz" demo verisinden
+  ///  kalmaydi ve altindaki gercek isimle celisiyordu.)
+  String get _collectorInitials {
+    final parts = _collectorName
+        .split(RegExp(r'\s+'))
+        .where((p) => p.isNotEmpty)
+        .toList();
+    if (parts.isEmpty) return '?';
+    if (parts.length == 1) {
+      final p = parts.first;
+      return (p.length == 1 ? p : p.substring(0, 2)).toUpperCase();
+    }
+    return (parts.first.substring(0, 1) + parts.last.substring(0, 1))
+        .toUpperCase();
   }
 
   @override
@@ -133,12 +171,67 @@ class _RequestTrackingScreenState extends ConsumerState<RequestTrackingScreen>
         _onCollectorArrived();
 
       case RequestStatus.iptal:
-        if (mounted) {
+        if (mounted && !_leaving) {
+          _leaving = true;
           ScaffoldMessenger.of(context).showSnackBar(
             const SnackBar(content: Text('Talep iptal edildi.')),
           );
           Navigator.of(context).pop();
         }
+    }
+  }
+
+  /// "Talebi İptal Et" — YALNIZCA henuz toplayici atanmamisken cagrilir.
+  ///
+  /// Iptal, Firestore'da status alanini 'iptal' yapar; talep toplayici
+  /// haritasindaki bekleyenler listesinden ayni anda dusler. Ekranin
+  /// kapanmasini burada ELLE yapmiyoruz: dokumandaki degisiklik zaten
+  /// [_syncWithRequest] uzerinden geri gelir ve ekrani kapatir — tek
+  /// gercek kaynak yine Firestore kalir.
+  Future<void> _confirmCancel() async {
+    Haptics.tap();
+    final ok = await showDialog<bool>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: const Text('Talep iptal edilsin mi?'),
+        content: const Text(
+          'Bu toplama talebi iptal edilecek ve toplayıcı listesinden '
+          'kaldırılacak. Dilediğiniz zaman yeni talep oluşturabilirsiniz.',
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.of(ctx).pop(false),
+            child: const Text('Vazgeç'),
+          ),
+          TextButton(
+            onPressed: () => Navigator.of(ctx).pop(true),
+            style: TextButton.styleFrom(foregroundColor: AppColors.error),
+            child: const Text('Talebi iptal et'),
+          ),
+        ],
+      ),
+    );
+    if (ok != true || !mounted) return;
+
+    setState(() => _cancelling = true);
+    try {
+      await ref.read(wasteRequestRepositoryProvider).updateStatus(
+            requestId: widget.request.id,
+            status: RequestStatus.iptal,
+          );
+    } catch (e) {
+      // Web'de ham FirebaseException tip cokmesine yol acar -> error_utils
+      final message = logAndReadError(e, context: 'cancelRequest');
+      if (mounted) {
+        setState(() => _cancelling = false);
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text('Talep iptal edilemedi: $message'),
+            backgroundColor: AppColors.error,
+            behavior: SnackBarBehavior.floating,
+          ),
+        );
+      }
     }
   }
 
@@ -278,22 +371,39 @@ class _RequestTrackingScreenState extends ConsumerState<RequestTrackingScreen>
           elevation: 4,
           shape:
               RoundedRectangleBorder(borderRadius: BorderRadius.circular(14)),
-          child: const Padding(
-            padding: EdgeInsets.symmetric(horizontal: 16, vertical: 14),
+          child: Padding(
+            padding: const EdgeInsets.fromLTRB(16, 14, 8, 14),
             child: Row(
               children: [
-                SizedBox(
+                const SizedBox(
                   width: 20,
                   height: 20,
                   child: CircularProgressIndicator(
                       strokeWidth: 2.5, color: AppColors.primary),
                 ),
-                SizedBox(width: 14),
-                Expanded(
+                const SizedBox(width: 14),
+                const Expanded(
                   child: Text(
                     'Size en yakın toplayıcı aranıyor...',
                     style: TextStyle(fontWeight: FontWeight.w600),
                   ),
+                ),
+                // Talep henuz alinmadi -> kullanici vazgecebilir.
+                // Toplayici yola ciktiktan sonra bu buton hic cizilmez.
+                TextButton(
+                  onPressed: _cancelling ? null : _confirmCancel,
+                  style: TextButton.styleFrom(
+                    foregroundColor: AppColors.error,
+                    visualDensity: VisualDensity.compact,
+                  ),
+                  child: _cancelling
+                      ? const SizedBox(
+                          width: 14,
+                          height: 14,
+                          child: CircularProgressIndicator(
+                              strokeWidth: 2, color: AppColors.error),
+                        )
+                      : const Text('İptal Et'),
                 ),
               ],
             ),
@@ -383,9 +493,9 @@ class _RequestTrackingScreenState extends ConsumerState<RequestTrackingScreen>
                 CircleAvatar(
                   radius: 24,
                   backgroundColor: AppColors.primary.withOpacity(0.12),
-                  child: const Text(
-                    'AY',
-                    style: TextStyle(
+                  child: Text(
+                    _collectorInitials,
+                    style: const TextStyle(
                       color: AppColors.primary,
                       fontWeight: FontWeight.bold,
                     ),
