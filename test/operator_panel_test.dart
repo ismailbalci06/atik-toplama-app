@@ -6,7 +6,6 @@
 import 'package:atik_toplama_app/features/rewards/domain/green_points.dart';
 import 'package:atik_toplama_app/features/rewards/domain/reward_models.dart';
 import 'package:atik_toplama_app/features/waste_request/domain/models/waste_request_model.dart';
-import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:google_maps_flutter/google_maps_flutter.dart';
 
@@ -120,8 +119,8 @@ void main() {
       expect(json['status'], 'beklemede');
     });
 
-    test('fromDoc karar alanlarini geri okur', () {
-      final r = Redemption.fromDoc(_FakeDoc({
+    test('fromJson karar alanlarini geri okur', () {
+      final r = Redemption.fromJson('red1', {
         'userId': 'u1',
         'userName': 'Test Tesis',
         'rewardId': 'rw',
@@ -129,25 +128,21 @@ void main() {
         'costPoints': 5000,
         'status': 'onaylandi',
         'decidedBy': 'op1',
-      }));
+      });
+      expect(r.id, 'red1');
       expect(r.status, RedemptionStatus.onaylandi);
       expect(r.decidedBy, 'op1');
       expect(r.costPoints, 5000);
+      expect(r.displayName, 'Test Tesis');
+    });
+
+    test('bilinmeyen status guvenli sekilde beklemede olur', () {
+      final r = Redemption.fromJson('red2', {
+        'userId': 'u1',
+        'costPoints': 100,
+        'status': 'bozuk-deger',
+      });
+      expect(r.status, RedemptionStatus.beklemede);
     });
   });
-}
-
-/// Firestore dokumani yerine gecen minimal sahte nesne
-class _FakeDoc implements DocumentSnapshot<Map<String, dynamic>> {
-  _FakeDoc(this._data);
-  final Map<String, dynamic> _data;
-
-  @override
-  Map<String, dynamic>? data() => _data;
-
-  @override
-  String get id => 'fake-id';
-
-  @override
-  dynamic noSuchMethod(Invocation invocation) => super.noSuchMethod(invocation);
 }

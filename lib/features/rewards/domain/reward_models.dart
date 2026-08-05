@@ -116,10 +116,18 @@ class Redemption {
         'status': status.name,
       };
 
-  factory Redemption.fromDoc(DocumentSnapshot<Map<String, dynamic>> doc) {
-    final json = doc.data() ?? {};
+  /// Firestore snapshot'indan model uretir.
+  factory Redemption.fromDoc(DocumentSnapshot<Map<String, dynamic>> doc) =>
+      Redemption.fromJson(doc.id, doc.data() ?? {});
+
+  /// Ham JSON'dan model uretir.
+  ///
+  /// [fromDoc]'tan AYRI olmasi bilincli (WasteRequest ile ayni desen):
+  /// boylece cozumleme mantigi Firestore tiplerini taklit etmeden test
+  /// edilebilir.
+  factory Redemption.fromJson(String id, Map<String, dynamic> json) {
     return Redemption(
-      id: doc.id,
+      id: id,
       userId: json['userId'] as String? ?? '',
       userName: json['userName'] as String?,
       rewardId: json['rewardId'] as String? ?? '',
