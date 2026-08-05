@@ -89,26 +89,59 @@ service cloud.firestore {
                     && request.resource.data.estimatedKg <= 1000;
 
       // --- GÜNCELLEME ---
-      // Yalnızca sevkiyat akışının değiştirdiği alanlara dokunulabilir.
-      // userId, location, wasteTypes, estimatedKg, note, createdAt
-      // DEĞİŞTİRİLEMEZ — yani kimse başkasının talebinin adresini veya
-      // miktarını sonradan çarpıtamaz.
-      allow update: if request.auth != null
-                    && request.resource.data.diff(resource.data)
-                       .affectedKeys()
-                       .hasOnly([
-                         'status',
-                         'collectorId',
-                         'acceptedAt',
-                         'collectorLocation',
-                         'collectorBearing',
-                         'collectorName',
-                         // Toplayicinin teslim alirken onayladigi gercek
-                         // miktar. Yesil Puan YALNIZCA bundan hesaplanir;
-                         // kullanicinin beyani (estimatedKg) bu listede
-                         // OLMADIGI icin sonradan degistirilemez.
-                         'confirmedKg'
-                       ]);
+      // Yalnızca sevkiyat akışının değiştirdiği alanlara dokunulabilir:
+      // userId, approxLocation, wasteTypes, estimatedKg, createdAt
+      // DEĞİŞTİRİLEMEZ.
+      //
+      // KRİTİK — YETKİ, ROLE BAĞLIDIR:
+      // Bu kural eskiden yalnızca "hangi alanlar" sorusunu soruyordu,
+      // "kim" sorusunu sormuyordu. O hâliyle giriş yapmış herhangi biri
+      // başkasının talebine kendini `collectorId` yazıp açık adresini
+      // okuyabiliyor, ya da talebi 'tamamlandi' işaretleyip sınırsız
+      // Yeşil Puan üretebiliyordu. Artık her meşru geçişin kendi dalı ve
+      // kendi kimlik şartı var. (rules_test/rules.test.js bunu ölçer.)
+      //
+      // Eksik alanlara .get(key, varsayılan) ile erişiliyor: kural
+      // değerlendirmesi sırasında olmayan bir alana dokunmak hataya ve
+      // dolayısıyla topyekûn redde yol açardı.
+      allow update: if request.auth != null && (
+
+        // (A) Toplayıcı BEKLEYEN bir talebi üstleniyor.
+        //     Kendi UID'sinden başkasını yazamaz -> başkasının adına iş
+        //     üstlenip adres okuyamaz.
+        (
+          resource.data.get('status', '') == 'bekliyor'
+          && request.resource.data.status == 'atandi'
+          && request.resource.data.collectorId == request.auth.uid
+          && request.resource.data.diff(resource.data).affectedKeys()
+               .hasOnly(['status', 'collectorId', 'collectorName',
+                         'acceptedAt', 'collectorLocation'])
+        )
+
+        // (B) ATANMIŞ toplayıcı: canlı konum yayını ve teslim onayı.
+        //     Yalnızca işi üstlenen kişi; ve yalnızca devam eden bir işte
+        //     (tamamlanmış talep yeniden tamamlanamaz -> puan tekrar
+        //     üretilemez).
+        || (
+          resource.data.get('collectorId', '') == request.auth.uid
+          && resource.data.get('status', '') in ['atandi', 'yolda']
+          && request.resource.data.status in ['yolda', 'tamamlandi']
+          && request.resource.data.diff(resource.data).affectedKeys()
+               .hasOnly(['status', 'collectorLocation',
+                         'collectorBearing', 'confirmedKg'])
+        )
+
+        // (C) Talebin SAHİBİ iptal ediyor — yalnızca henüz beklerken.
+        //     "Araç yola çıktıktan sonra iptal edilemez" iş kuralı bugüne
+        //     kadar sadece arayüzdeydi; artık sunucuda.
+        || (
+          resource.data.get('userId', '') == request.auth.uid
+          && resource.data.get('status', '') == 'bekliyor'
+          && request.resource.data.status == 'iptal'
+          && request.resource.data.diff(resource.data).affectedKeys()
+               .hasOnly(['status'])
+        )
+      );
 
       // --- SİLME ---
       // Uygulama hiçbir yerde silme yapmıyor; bu yüzden tamamen kapalı.
