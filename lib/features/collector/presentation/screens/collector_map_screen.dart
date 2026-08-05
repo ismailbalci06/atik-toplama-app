@@ -318,8 +318,23 @@ class _CollectorMapScreenState extends ConsumerState<CollectorMapScreen>
       // FirebaseException dahil diger tum hatalar: guvenli string'e cevir
       final message = logAndReadError(e, context: 'acceptRequest');
       if (mounted) {
+        // YETKI REDDI ozel olarak ayrilir: bu bir baglanti sorunu DEGIL,
+        // hesabin dogrulanmis toplayici olmamasidir. Ham
+        // "[permission-denied] Missing or insufficient permissions"
+        // mesaji kullaniciya hicbir sey anlatmaz.
+        final isNotCollector = message.contains('permission-denied');
         ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text('Bağlantı hatası: $message')),
+          SnackBar(
+            content: Text(
+              isNotCollector
+                  ? 'Bu hesap doğrulanmış saha görevlisi değil. Toplayıcı '
+                      'yetkisi ATOS operatörü tarafından tanımlanır.'
+                  : 'Bağlantı hatası: $message',
+            ),
+            backgroundColor: AppColors.error,
+            behavior: SnackBarBehavior.floating,
+            duration: const Duration(seconds: 4),
+          ),
         );
       }
       return;

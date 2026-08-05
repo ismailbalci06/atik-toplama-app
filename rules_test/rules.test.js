@@ -54,6 +54,13 @@ async function seed() {
     // Operator yetkisi
     await setDoc(doc(db, 'admins', OPERATOR), { name: 'ATOS Operator' });
 
+    // DOGRULANMIS toplayici (beyaz liste). STRANGER bilincli olarak
+    // burada YOK: dogrulanmamis hesabi temsil ediyor.
+    await setDoc(doc(db, 'collectors', COLLECTOR), {
+      name: 'Toplayici Bir',
+      approvedBy: OPERATOR,
+    });
+
     // Bekleyen talep (henuz toplayici yok)
     await setDoc(doc(db, 'waste_requests', REQ_PENDING), {
       userId: OWNER,
@@ -154,28 +161,6 @@ describe('1) Anonim erisim tamamen kapali', () => {
 
 // =====================================================================
 describe('2) P0 — kimlik denetimi (yetki calma)', () => {
-  // BILINEN SINIR — bilincli olarak belgeleniyor:
-  // Sistemde toplayici DOGRULAMASI yok. Rol secimi sadece bir arayuz
-  // tercihi oldugu icin, giris yapmis herhangi bir kullanici bekleyen bir
-  // isi ustlenebilir; ustlendigi ANDA da o talebin acik adresini okumaya
-  // hak kazanir (kural boyle tasarlandi).
-  //
-  // Yani maskeleme "adresleri tarayarak toplamayi" engeller, ama kayit
-  // olan birinin TEK BIR adresi is ustlenerek gormesini engellemez.
-  // Kapatmak icin `collectors/{uid}` beyaz listesi gerekir (bkz. admins
-  // ile ayni desen). Bu test o sinirin farkinda oldugumuzu ve kazara
-  // degismedigini garanti eder.
-  test('BILINEN SINIR: kayitli her kullanici bekleyen isi ustlenebilir',
-    async () => {
-      await assertSucceeds(
-        updateDoc(doc(asStranger(), 'waste_requests', REQ_PENDING), {
-          status: 'atandi',
-          collectorId: STRANGER,
-          collectorName: 'Yabanci',
-        }),
-      );
-    });
-
   test('ustlenirken BASKASININ UID ini toplayici yazamaz', async () => {
     // Kritik: yabanci, isi COLLECTOR adina ustlenip sonra kendi
     // yetkisiyle adrese ulasmayi deneyemez.
@@ -545,6 +530,114 @@ describe('7) CANLI AKIS REPLAY — demodaki birebir yazma dizisi', () => {
           collectorLocation: { latitude: 39.6, longitude: 32.1 },
           collectorBearing: Number.NaN,
           status: 'yolda',
+        }),
+      );
+    });
+});
+
+// =====================================================================
+describe('8) TOPLAYICI DOGRULAMASI — collectors/{uid} beyaz listesi', () => {
+  // Kapatilan zafiyet: rol secimi yalnizca bir ARAYUZ tercihiydi. Bu yuzden
+  // e-postayla kayit olan herkes "Toplayici" secip bekleyen bir isi
+  // ustlenebiliyor ve ustlendigi anda o isletmenin ACIK ADRESINI
+  // okuyabiliyordu. Maskeleme adresleri toplu taramayi engelliyordu ama
+  // teker teker gormeyi engellemiyordu.
+  //
+  // Artik is ustlenmek `collectors/{uid}` kaydi sart. Adres okuma zaten
+  // collectorId'ye bagli oldugundan, dogrulanmamis hesap adrese TRANSITIF
+  // olarak da ulasamaz.
+
+  test('DOGRULANMAMIS hesap bekleyen isi USTLENEMEZ', async () => {
+    await assertFails(
+      updateDoc(doc(asStranger(), 'waste_requests', REQ_PENDING), {
+        status: 'atandi',
+        collectorId: STRANGER,
+        collectorName: 'Dogrulanmamis',
+      }),
+    );
+  });
+
+  test('DOGRULANMAMIS hesap is ustlenemedigi icin ACIK ADRESI goremez',
+    async () => {
+      // Once ustlenmeyi dene (reddedilmeli)
+      await assertFails(
+        updateDoc(doc(asStranger(), 'waste_requests', REQ_PENDING), {
+          status: 'atandi',
+          collectorId: STRANGER,
+        }),
+      );
+      // Dolayisiyla korumali detay da kapali kalir
+      await assertFails(
+        getDoc(
+          doc(asStranger(), 'waste_requests', REQ_PENDING, 'private', 'detail'),
+        ),
+      );
+    });
+
+  test('DOGRULANMIS toplayici isi ustlenebilir ve adresi okuyabilir',
+    async () => {
+      await assertSucceeds(
+        updateDoc(doc(asCollector(), 'waste_requests', REQ_PENDING), {
+          status: 'atandi',
+          collectorId: COLLECTOR,
+          collectorName: 'Toplayici Bir',
+          collectorLocation: { latitude: 39.61, longitude: 32.18 },
+        }),
+      );
+      await assertSucceeds(
+        getDoc(
+          doc(asCollector(), 'waste_requests', REQ_PENDING, 'private', 'detail'),
+        ),
+      );
+    });
+
+  test('kimse kendini toplayici yapamaz', async () => {
+    await assertFails(
+      setDoc(doc(asStranger(), 'collectors', STRANGER), { name: 'hile' }),
+    );
+  });
+
+  test('toplayici kendi kaydini okuyabilir', async () => {
+    await assertSucceeds(getDoc(doc(asCollector(), 'collectors', COLLECTOR)));
+  });
+
+  test('toplayici listesi disariya sizmaz', async () => {
+    await assertFails(getDoc(doc(asStranger(), 'collectors', COLLECTOR)));
+  });
+
+  // TASARIM KARARI: dogrulama YALNIZCA is ustlenirken aranir.
+  // Sebep 1 (dogruluk): yolculuk ortasinda yetkisi kaldirilan toplayicinin
+  //   teslimati askida kalmamali — atama zaten yetkinin kendisidir.
+  // Sebep 2 (maliyet): konum yayini ~900 ms'de bir calisiyor; her yazmaya
+  //   exists() eklemek her yayina fazladan bir dokuman okumasi bindirirdi.
+  test('devam eden teslimat, yetki sonradan kaldirilsa da bitirilebilir',
+    async () => {
+      await testEnv.withSecurityRulesDisabled(async (ctx) => {
+        // Toplayici beyaz listeden cikarildi
+        const { deleteDoc } = await import('firebase/firestore');
+        await deleteDoc(doc(ctx.firestore(), 'collectors', COLLECTOR));
+      });
+
+      // Uzerindeki is devam edebilmeli
+      await assertSucceeds(
+        updateDoc(doc(asCollector(), 'waste_requests', REQ_ASSIGNED), {
+          collectorLocation: { latitude: 39.6, longitude: 32.1 },
+          collectorBearing: 90,
+          status: 'yolda',
+        }),
+      );
+      await assertSucceeds(
+        updateDoc(doc(asCollector(), 'waste_requests', REQ_ASSIGNED), {
+          status: 'tamamlandi',
+          confirmedKg: 60,
+        }),
+      );
+
+      // Ama YENI is ustlenemez
+      await assertFails(
+        updateDoc(doc(asCollector(), 'waste_requests', REQ_PENDING), {
+          status: 'atandi',
+          collectorId: COLLECTOR,
         }),
       );
     });

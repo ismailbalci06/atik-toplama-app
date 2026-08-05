@@ -48,12 +48,32 @@ service cloud.firestore {
              && exists(/databases/$(database)/documents/admins/$(request.auth.uid));
     }
 
+    // DOĞRULANMIŞ TOPLAYICI mı?
+    //
+    // Rol seçimi uygulamada yalnızca bir ARAYÜZ tercihidir; güvenlik ona
+    // bırakılamaz. Saha görevlisi yetkisi `collectors/{uid}` dokümanının
+    // VARLIĞINDAN gelir ve o koleksiyona uygulamadan yazılamaz — yani
+    // e-postayla kayıt olan biri kendini toplayıcı ilan edemez.
+    function isCollector() {
+      return request.auth != null
+             && exists(/databases/$(database)/documents/collectors/$(request.auth.uid));
+    }
+
     // --- OPERATÖR LİSTESİ ---
     // Kullanıcı yalnızca KENDİ admin kaydını okuyabilir (uygulama "ben
     // operatör müyüm?" diye sorabilsin diye). Başkasınınkini göremez,
     // yani operatörlerin kim olduğu dışarıya sızmaz.
     match /admins/{adminId} {
       allow read: if request.auth != null && request.auth.uid == adminId;
+      allow write: if false;
+    }
+
+    // --- DOĞRULANMIŞ TOPLAYICI LİSTESİ ---
+    // admins ile birebir aynı desen: uygulama yalnızca "ben toplayıcı
+    // mıyım?" diye kendi kaydını sorabilir; liste dışarıya sızmaz ve
+    // yetki yalnızca Firebase Console'dan (yönetici) verilir.
+    match /collectors/{collectorId} {
+      allow read: if request.auth != null && request.auth.uid == collectorId;
       allow write: if false;
     }
 
@@ -106,11 +126,20 @@ service cloud.firestore {
       // dolayısıyla topyekûn redde yol açardı.
       allow update: if request.auth != null && (
 
-        // (A) Toplayıcı BEKLEYEN bir talebi üstleniyor.
+        // (A) DOĞRULANMIŞ toplayıcı BEKLEYEN bir talebi üstleniyor.
         //     Kendi UID'sinden başkasını yazamaz -> başkasının adına iş
         //     üstlenip adres okuyamaz.
+        //
+        //     isCollector() BURADA aranır, (B)'de aranmaz. İki sebeple:
+        //       1. Doğruluk: yolculuk ortasında yetkisi kaldırılan
+        //          toplayıcının teslimatı askıda kalmamalı — atamanın
+        //          kendisi zaten yetkidir.
+        //       2. Maliyet: konum yayını ~900 ms'de bir çalışıyor; her
+        //          yazmaya exists() eklemek her yayına fazladan bir
+        //          doküman okuması bindirirdi.
         (
-          resource.data.get('status', '') == 'bekliyor'
+          isCollector()
+          && resource.data.get('status', '') == 'bekliyor'
           && request.resource.data.status == 'atandi'
           && request.resource.data.collectorId == request.auth.uid
           && request.resource.data.diff(resource.data).affectedKeys()
