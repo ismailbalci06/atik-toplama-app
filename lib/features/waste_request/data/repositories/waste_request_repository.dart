@@ -243,6 +243,36 @@ class WasteRequestRepository {
             snapshot.docs.map(WasteRequest.fromDoc).toList());
   }
 
+  /// Bir TOPLAYICININ devam eden teslimati (varsa).
+  ///
+  /// NEDEN VAR — dayaniklilik: Toplayicinin aktif gorevi bugune kadar
+  /// yalnizca EKRANIN BELLEGINDE tutuluyordu. Sayfa yenilenirse (mobil
+  /// tarayici sekmeyi atarsa, arka planda rAF dururusa, internet giderse)
+  /// gorev 'yolda' durumunda ASKIDA kaliyor ve hicbir yoldan geri
+  /// alinamiyordu. Bu akis sayesinde toplayici ekrani her acildiginda
+  /// devam eden isini Firestore'dan bulup kaldigi yerden surdurur.
+  ///
+  /// Filtreleme ISTEMCIDE: 'collectorId' esitligi + 'status' coklu filtresi
+  /// Firestore'da bilesik indeks gerektirirdi (ayni gerekce
+  /// getPendingRequests'te de yazili). Bir toplayicinin kayit sayisi kucuk
+  /// oldugu icin istemci tarafi filtre hem yeterli hem indeks bagimsiz.
+  Stream<WasteRequest?> watchActiveDeliveryOf(String collectorId) {
+    if (collectorId.isEmpty) return Stream.value(null);
+    return _requests
+        .where('collectorId', isEqualTo: collectorId)
+        .snapshots()
+        .map((snap) {
+      final active = snap.docs
+          .map(WasteRequest.fromDoc)
+          .where((r) =>
+              r.status == RequestStatus.atandi ||
+              r.status == RequestStatus.yolda)
+          .toList()
+        ..sort((a, b) => b.createdAt.compareTo(a.createdAt));
+      return active.isEmpty ? null : active.first;
+    });
+  }
+
   /// Bir kullanicinin kendi taleplerinin canli akisi (gecmis/aktif liste).
   Stream<List<WasteRequest>> getRequestsByUser(String userId) {
     return _requests

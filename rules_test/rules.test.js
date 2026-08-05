@@ -487,3 +487,65 @@ describe('6) Odul ekonomisi ve operator yetkisi', () => {
     );
   });
 });
+
+// =====================================================================
+describe('7) CANLI AKIS REPLAY — demodaki birebir yazma dizisi', () => {
+  test('ustlen -> 9 kez konum yayini -> teslim onayi: hepsi gecmeli',
+    async () => {
+      const collectorDb = asCollector();
+      const ref = doc(collectorDb, 'waste_requests', REQ_PENDING);
+
+      // 1) Talebi ustlen (acceptRequest transaction'inin yazdigi alanlar)
+      await assertSucceeds(
+        updateDoc(ref, {
+          status: 'atandi',
+          collectorId: COLLECTOR,
+          collectorName: 'Toplayici Bir',
+          acceptedAt: new Date(),
+          collectorLocation: { latitude: 39.61, longitude: 32.18 },
+        }),
+      );
+
+      // 2) 8 saniyelik yolculukta ~900 ms'de bir konum yayini
+      for (let i = 0; i < 9; i++) {
+        await assertSucceeds(
+          updateDoc(ref, {
+            collectorLocation: {
+              latitude: 39.61 - i * 0.001,
+              longitude: 32.18 - i * 0.002,
+            },
+            collectorBearing: 180 + i,
+            status: 'yolda',
+          }),
+        );
+      }
+
+      // 3) Varista teslim onayi
+      await assertSucceeds(
+        updateDoc(ref, { status: 'tamamlandi', confirmedKg: 180 }),
+      );
+    });
+
+  test('konum HIC DEGISMESE bile yazma reddedilmez', async () => {
+    // Arac duruyorsa diff() bos kalir; hasOnly([]) true olmali.
+    const ref = doc(asCollector(), 'waste_requests', REQ_ASSIGNED);
+    await assertSucceeds(
+      updateDoc(ref, { collectorBearing: 0, status: 'yolda' }),
+    );
+    await assertSucceeds(
+      updateDoc(ref, { collectorBearing: 0, status: 'yolda' }),
+    );
+  });
+
+  test('bearing NaN olsa bile kural reddetmez (tip dogrulamasi yok)',
+    async () => {
+      const ref = doc(asCollector(), 'waste_requests', REQ_ASSIGNED);
+      await assertSucceeds(
+        updateDoc(ref, {
+          collectorLocation: { latitude: 39.6, longitude: 32.1 },
+          collectorBearing: Number.NaN,
+          status: 'yolda',
+        }),
+      );
+    });
+});

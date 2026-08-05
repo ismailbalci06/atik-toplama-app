@@ -49,6 +49,19 @@ final userRequestsProvider = StreamProvider.autoDispose
   return ref.watch(wasteRequestRepositoryProvider).getRequestsByUser(userId);
 });
 
+/// TOPLAYICININ devam eden teslimati.
+///
+/// Dayaniklilik icin: sayfa yenilenirse (mobil tarayici sekmeyi atar,
+/// arka planda animasyon durur, internet kesilir) toplayici ekrani bu
+/// akistan aktif gorevini bulur ve kaldigi yerden surdurur. Gorev artik
+/// ekranin bellegine degil Firestore'a bagli.
+final activeDeliveryProvider = StreamProvider.autoDispose
+    .family<WasteRequest?, String>((ref, collectorId) {
+  return ref
+      .watch(wasteRequestRepositoryProvider)
+      .watchActiveDeliveryOf(collectorId);
+});
+
 /// HASSAS DETAY: tam koordinat + kullanici notu.
 ///
 /// Yetkisi olmayan biri dinlerse Firestore permission-denied firlatir ve

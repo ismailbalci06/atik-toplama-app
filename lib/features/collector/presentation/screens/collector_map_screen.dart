@@ -95,6 +95,15 @@ class _CollectorMapScreenState extends ConsumerState<CollectorMapScreen>
   /// yaricap onu kesin kapsar ve icinde nerede oldugunu belli etmez.
   static const double _maskRadiusMeters = 500;
 
+  /// Ust uste basarisiz olan konum yayini sayisi ve son hata metni.
+  /// Sifirdan buyukse ekranda uyari seridi cikar — yayin sessizce
+  /// kesilmesin, sorunu demo sirasinda ANINDA gorelim.
+  int _failedPushes = 0;
+  String? _lastPushError;
+
+  /// Kesintiden sonra ayni gorevi tekrar tekrar surdurmeye calismayi onler
+  String? _resumedRequestId;
+
   @override
   void initState() {
     super.initState();
@@ -118,40 +127,72 @@ class _CollectorMapScreenState extends ConsumerState<CollectorMapScreen>
   // SIMULASYON (arac hareketi yerel; durum degisiklikleri Firestore'da)
   // ---------------------------------------------------------------
 
+  /// Animasyonun HER karesinde calisir (saniyede ~60).
+  ///
+  /// DAYANIKLILIK: Govdenin tamami try/catch icinde. Buradan disari kacan
+  /// tek bir istisna, saniyede 60 kez tekrarlanacagi icin ekrani kullanilamaz
+  /// hale getirir. Hicbir kare hatasi yolculugu durdurmamali; hata olsa bile
+  /// konsola basilip devam edilir.
   void _onTripTick() {
-    if (_activeRoutePoints.length < 2) return;
-    final t = Curves.easeInOut.transform(_tripController.value);
-    final routePos = MapUtils.positionOnRoute(_activeRoutePoints, t);
+    try {
+      if (_activeRoutePoints.length < 2) return;
+      final t = Curves.easeInOut.transform(_tripController.value);
+      final routePos = MapUtils.positionOnRoute(_activeRoutePoints, t);
 
-    setState(() {
-      _collectorPosition = routePos.position;
-      _collectorBearing = routePos.bearing;
+      setState(() {
+        _collectorPosition = routePos.position;
+        _collectorBearing = routePos.bearing;
+      });
+
+      final now = DateTime.now();
+
+      // Kamerayi HER KAREDE degil, araliklarla takip ettir (harita kilitlenmesin)
+      if (now.difference(_lastCameraMove) >= _cameraFollowInterval) {
+        _lastCameraMove = now;
+        _mapController?.animateCamera(
+          CameraUpdate.newLatLng(routePos.position),
+        );
+      }
+
+      // CANLI KONUM YAYINI: konumu Firestore'a yaz ki kullanicinin takip
+      // ekrani ayni gercekligi gorsun (tek gercek kaynak).
+      final active = _activeRequest;
+      if (active != null &&
+          now.difference(_lastLocationPush) >= _locationPushInterval) {
+        _lastLocationPush = now;
+        _pushLocation(active.id, routePos);
+      }
+    } catch (e, s) {
+      // Kare basina hata: akisi KESME, sadece kaydet.
+      debugPrint('🔥 Yolculuk karesi hatasi: ${readableError(e)}\n$s');
+    }
+  }
+
+  /// Konum yayinini yapar ve BASARISIZLIGI GORUNUR kilar.
+  ///
+  /// Eskiden hata sessizce yutuluyordu: yayin kesilse bile toplayici bunu
+  /// hicbir yerden anlamiyor, kullanicinin takip ekrani ise donuyordu.
+  /// Artik ust uste basarisiz olan yayinlar ekranda bir uyari seridine
+  /// donusuyor — demo sirasinda sorunu ANINDA gorursun.
+  void _pushLocation(String requestId, RoutePosition routePos) {
+    ref
+        .read(wasteRequestRepositoryProvider)
+        .updateCollectorLocation(
+          requestId: requestId,
+          position: routePos.position,
+          bearing: routePos.bearing,
+        )
+        .then((_) {
+      if (!mounted) return;
+      if (_failedPushes != 0) setState(() => _failedPushes = 0);
+    }).catchError((Object e) {
+      logAndReadError(e, context: 'konum yayini');
+      if (!mounted) return;
+      setState(() {
+        _failedPushes++;
+        _lastPushError = readableError(e);
+      });
     });
-
-    final now = DateTime.now();
-
-    // Kamerayi HER KAREDE degil, araliklarla takip ettir (harita kilitlenmesin)
-    if (now.difference(_lastCameraMove) >= _cameraFollowInterval) {
-      _lastCameraMove = now;
-      _mapController?.animateCamera(CameraUpdate.newLatLng(routePos.position));
-    }
-
-    // CANLI KONUM YAYINI: konumu Firestore'a yaz ki kullanicinin takip
-    // ekrani ayni gercekligi gorsun (tek gercek kaynak).
-    final active = _activeRequest;
-    if (active != null &&
-        now.difference(_lastLocationPush) >= _locationPushInterval) {
-      _lastLocationPush = now;
-      ref
-          .read(wasteRequestRepositoryProvider)
-          .updateCollectorLocation(
-            requestId: active.id,
-            position: routePos.position,
-            bearing: routePos.bearing,
-          )
-          // Yazma hatasi demo akisini KESMESIN; sadece konsola dus
-          .catchError((Object e) => logAndReadError(e, context: 'konum'));
-    }
   }
 
   /// Arac hedefe varinca: Firestore'da talebi 'tamamlandi' yap + kutlama.
@@ -429,12 +470,67 @@ class _CollectorMapScreenState extends ConsumerState<CollectorMapScreen>
     );
   }
 
+  /// KESINTI KURTARMA — devam eden bir teslimat varsa kaldigi yerden surdurur.
+  ///
+  /// Neden gerekli: Toplayicinin aktif gorevi eskiden sadece bu ekranin
+  /// bellegindeydi. Mobil tarayici sekmeyi attiginda, sekme arka planda
+  /// kalip animasyon karesi (rAF) durdugunda ya da internet gittiginde
+  /// gorev 'yolda' durumunda ASKIDA kaliyordu: ne toplayici devam
+  /// edebiliyor ne kullanici bir sey gorebiliyordu.
+  ///
+  /// Artik ekran her acildiginda Firestore'daki gercek duruma bakilir.
+  /// Rota, aracin SU ANKI konumundan hedefe yeniden kurulur — yani
+  /// yolculuk kaldigi yerden devam etmis gibi gorunur.
+  Future<void> _resumeIfInterrupted(WasteRequest delivery) async {
+    // Zaten bu gorev uzerinde calisiyoruz ya da bir kez surdurduk
+    if (_activeRequest?.id == delivery.id) return;
+    if (_resumedRequestId == delivery.id) return;
+    if (_tripController.isAnimating) return;
+    _resumedRequestId = delivery.id;
+
+    // Adres detayi: bu gorev bizim uzerimizde oldugu icin kural izin verir
+    final RequestDetail? detail;
+    try {
+      detail =
+          await ref.read(wasteRequestRepositoryProvider).getDetail(delivery.id);
+    } catch (e) {
+      logAndReadError(e, context: 'kurtarma/getDetail');
+      return;
+    }
+    if (!mounted || detail == null) return;
+
+    // Toplayici en son nerede kaldiysa oradan devam et
+    final resumeFrom = delivery.collectorLocation ?? _collectorPosition;
+    setState(() {
+      _collectorPosition = resumeFrom;
+      _collectorBearing = delivery.collectorBearing ?? _collectorBearing;
+      _activeDetail = detail;
+    });
+
+    _startTrip(delivery, detail.exactLocation, resumed: true);
+
+    if (mounted) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text('↻ Devam eden teslimatınız kaldığı yerden sürüyor.'),
+          backgroundColor: AppColors.primary,
+          behavior: SnackBarBehavior.floating,
+          duration: Duration(seconds: 3),
+        ),
+      );
+    }
+  }
+
   /// Rota cizer, kamerayi odaklar ve arac animasyonunu baslatir.
   ///
   /// [destination] TAM adrestir ve YALNIZCA talep basariyla uzerimize
   /// alindiktan sonra elde edilebilir (korumali detay dokumani). Yani
   /// rota, maskenin sunucuda kalkmasindan sonra cizilir.
-  void _startTrip(WasteRequest request, LatLng destination) {
+  void _startTrip(
+    WasteRequest request,
+    LatLng destination, {
+    bool resumed = false,
+  }) {
     final routePoints =
         MapUtils.buildCurvedRoute(_collectorPosition, destination);
 
@@ -459,14 +555,18 @@ class _CollectorMapScreenState extends ConsumerState<CollectorMapScreen>
       MapUtils.fitTwoPoints(_collectorPosition, destination),
     );
 
-    ScaffoldMessenger.of(context).showSnackBar(
-      const SnackBar(
-        content: Text('🚛 Görev alındı! Araç yola çıkıyor...'),
-        backgroundColor: AppColors.primary,
-        behavior: SnackBarBehavior.floating,
-        duration: Duration(seconds: 2),
-      ),
-    );
+    // Kurtarma sirasinda "Görev alındı" demek yaniltici olur; o durumda
+    // bilgilendirmeyi cagiran taraf (_resumeIfInterrupted) yapar.
+    if (!resumed) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text('🚛 Görev alındı! Araç yola çıkıyor...'),
+          backgroundColor: AppColors.primary,
+          behavior: SnackBarBehavior.floating,
+          duration: Duration(seconds: 2),
+        ),
+      );
+    }
 
     Future.delayed(const Duration(milliseconds: 900), () {
       if (mounted) _tripController.forward(from: 0);
@@ -547,6 +647,17 @@ class _CollectorMapScreenState extends ConsumerState<CollectorMapScreen>
 
   @override
   Widget build(BuildContext context) {
+    // KESINTI KURTARMA: bu toplayicinin devam eden gorevi var mi?
+    // Sayfa yenilendiyse (mobil sekme atildi, arka planda animasyon
+    // durdu, internet gitti) gorev burada bulunur ve surdurulur.
+    ref.listen(
+      activeDeliveryProvider(ref.watch(currentUserIdProvider)),
+      (previous, next) {
+        final delivery = next.valueOrNull;
+        if (delivery != null) _resumeIfInterrupted(delivery);
+      },
+    );
+
     // CANLI VERI: Firestore'daki bekleyen talepleri dinle.
     // Yeni talep yazildigi anda bu widget otomatik yeniden cizilir.
     final pendingAsync = ref.watch(pendingRequestsProvider);
@@ -599,6 +710,50 @@ class _CollectorMapScreenState extends ConsumerState<CollectorMapScreen>
             // arasinda kalan GERCEK gorunur alana gore ortalar.
             padding: const EdgeInsets.only(top: 130, bottom: 150),
           ),
+
+          // --- Konum yayini kesildi uyarisi ---
+          // Sessiz basarisizlik yok: yayin ust uste 2 kez duserse toplayici
+          // bunu ekranda gorur. Kullanicinin takip ekraninin neden dondugu
+          // tahmin edilmez, YAZAR.
+          if (_failedPushes >= 2)
+            Positioned(
+              left: 16,
+              right: 16,
+              top: MediaQuery.of(context).padding.top + 8,
+              child: PointerInterceptor(
+                child: Container(
+                  padding: const EdgeInsets.symmetric(
+                      horizontal: 14, vertical: 10),
+                  decoration: BoxDecoration(
+                    color: AppColors.error,
+                    borderRadius:
+                        BorderRadius.circular(AppTheme.radiusCard),
+                    boxShadow: AppColors.softShadow,
+                  ),
+                  child: Row(
+                    children: [
+                      const Icon(Icons.wifi_off_rounded,
+                          color: Colors.white, size: 18),
+                      const SizedBox(width: 10),
+                      Expanded(
+                        child: Text(
+                          'Canlı konum yayını kesildi ($_failedPushes deneme). '
+                          '${_lastPushError ?? ""}',
+                          maxLines: 2,
+                          overflow: TextOverflow.ellipsis,
+                          style: const TextStyle(
+                            color: Colors.white,
+                            fontSize: 12,
+                            fontWeight: FontWeight.w600,
+                            height: 1.3,
+                          ),
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+              ),
+            ),
 
           // --- Akilli Rota Optimizasyonu rozeti ---
           // Sadece optimize edilecek birden fazla durak varken gorunur.
