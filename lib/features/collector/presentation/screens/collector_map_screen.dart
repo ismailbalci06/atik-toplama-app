@@ -11,6 +11,7 @@ import '../../../../core/utils/marker_icons.dart';
 import '../../../../core/utils/route_optimizer.dart';
 import '../../../../core/widgets/premium_progress_bar.dart';
 import '../../../auth/presentation/providers/auth_providers.dart';
+import '../../../reputation/presentation/providers/reputation_providers.dart';
 import '../../../waste_request/domain/models/waste_request_model.dart';
 import '../../../waste_request/presentation/providers/waste_request_providers.dart';
 import '../widgets/arrival_celebration_dialog.dart';
@@ -904,6 +905,16 @@ class _CollectorMapScreenState extends ConsumerState<CollectorMapScreen>
                         ],
                       ),
                     ),
+
+                  // GUVENILIRLIK KARNESI — oturumdan bagimsiz, kalici.
+                  // Isletmelerin verdigi yildizlardan turetilir; toplayici
+                  // kendi puanini degistiremez (kural: update/delete kapali).
+                  Padding(
+                    padding: const EdgeInsets.only(top: 6, left: 12),
+                    child: _MyReputationLine(
+                      collectorId: ref.watch(currentUserIdProvider),
+                    ),
+                  ),
                     ],
                   ),
                 ),
@@ -1081,6 +1092,75 @@ class _SmartRouteBadgeState extends State<_SmartRouteBadge>
           ),
         ],
       ),
+    );
+  }
+}
+
+/// Toplayicinin KENDI guvenilirlik karnesi (harita ustu bilgi kartinda).
+///
+/// Oyunlastirmanin toplayici tarafi: gorevli aldigi yildizlari ve
+/// "Güvenilir görevli" rozetini gorur. Rozet esigi bilincli olarak iki
+/// kosullu (>=5 teslimat ve >=4.5 ortalama): tek bir 5 yildizla rozet
+/// dagitmak onu anlamsizlastirirdi.
+class _MyReputationLine extends ConsumerWidget {
+  const _MyReputationLine({required this.collectorId});
+
+  final String collectorId;
+
+  @override
+  Widget build(BuildContext context, WidgetRef ref) {
+    if (collectorId.isEmpty) return const SizedBox.shrink();
+    final rep = ref.watch(collectorReputationProvider(collectorId));
+
+    if (rep.isNew) {
+      return Row(
+        children: [
+          Icon(Icons.star_outline_rounded,
+              size: 15, color: Colors.grey.shade500),
+          const SizedBox(width: 6),
+          Text(
+            'Henüz değerlendirilmediniz',
+            style: TextStyle(
+              fontSize: 11.5,
+              fontWeight: FontWeight.w600,
+              color: Colors.grey.shade600,
+            ),
+          ),
+        ],
+      );
+    }
+
+    return Row(
+      children: [
+        const Icon(Icons.star_rounded, size: 15, color: Color(0xFFF5A623)),
+        const SizedBox(width: 6),
+        Text(
+          '${rep.displayScore} · ${rep.count} değerlendirme',
+          style: const TextStyle(
+            fontSize: 11.5,
+            fontWeight: FontWeight.w700,
+            color: AppColors.textPrimary,
+          ),
+        ),
+        if (rep.isTrusted) ...[
+          const SizedBox(width: 8),
+          Container(
+            padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
+            decoration: BoxDecoration(
+              color: AppColors.successBg,
+              borderRadius: BorderRadius.circular(AppTheme.radiusBadge),
+            ),
+            child: const Text(
+              '🛡 Güvenilir görevli',
+              style: TextStyle(
+                fontSize: 10.5,
+                fontWeight: FontWeight.w800,
+                color: AppColors.successInk,
+              ),
+            ),
+          ),
+        ],
+      ],
     );
   }
 }

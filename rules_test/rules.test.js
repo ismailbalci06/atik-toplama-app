@@ -43,6 +43,7 @@ const OPERATOR = 'operator-1'; // admins/{uid} kaydi olan yonetici
 
 const REQ_PENDING = 'talep-bekleyen';
 const REQ_ASSIGNED = 'talep-atanmis';
+const REQ_DONE = 'talep-tamamlanmis';
 
 let testEnv;
 
@@ -96,6 +97,18 @@ async function seed() {
         note: 'Arka kapidan',
       },
     );
+
+    // TAMAMLANMIS teslimat — puanlanabilir olan
+    await setDoc(doc(db, 'waste_requests', REQ_DONE), {
+      userId: OWNER,
+      wasteTypes: ['kagit'],
+      estimatedKg: 50,
+      approxLocation: { latitude: 39.6, longitude: 32.1 },
+      status: 'tamamlandi',
+      collectorId: COLLECTOR,
+      collectorName: 'Toplayici Bir',
+      confirmedKg: 50,
+    });
 
     // Odul katalogu + bekleyen odul talebi
     await setDoc(doc(db, 'rewards', 'odul-1'), {
@@ -641,4 +654,101 @@ describe('8) TOPLAYICI DOGRULAMASI — collectors/{uid} beyaz listesi', () => {
         }),
       );
     });
+});
+
+// =====================================================================
+describe('9) GUVENILIRLIK PUANI — ratings/{requestId}', () => {
+  const rating = (over = {}) => ({
+    collectorId: COLLECTOR,
+    raterId: OWNER,
+    stars: 5,
+    ...over,
+  });
+
+  test('talep sahibi TAMAMLANMIS teslimati puanlayabilir', async () => {
+    await assertSucceeds(
+      setDoc(doc(asOwner(), 'ratings', REQ_DONE), rating()),
+    );
+  });
+
+  test('AYNI teslimat ikinci kez puanlanamaz', async () => {
+    await assertSucceeds(
+      setDoc(doc(asOwner(), 'ratings', REQ_DONE), rating()),
+    );
+    // Ayni dokuman ID'si -> ikinci yazma bir GUNCELLEME olur, kural kapali
+    await assertFails(
+      setDoc(doc(asOwner(), 'ratings', REQ_DONE), rating({ stars: 1 })),
+    );
+  });
+
+  test('YABANCI, baskasinin teslimatini puanlayamaz', async () => {
+    await assertFails(
+      setDoc(doc(asStranger(), 'ratings', REQ_DONE), rating({
+        raterId: STRANGER,
+      })),
+    );
+  });
+
+  test('TAMAMLANMAMIS teslimat puanlanamaz', async () => {
+    // REQ_ASSIGNED hala 'yolda'
+    await assertFails(
+      setDoc(doc(asOwner(), 'ratings', REQ_ASSIGNED), rating()),
+    );
+  });
+
+  test('toplayici KENDINE puan yazamaz', async () => {
+    await assertFails(
+      setDoc(doc(asCollector(), 'ratings', REQ_DONE), rating({
+        raterId: COLLECTOR,
+      })),
+    );
+  });
+
+  test('puan, isi YAPMAYAN bir toplayiciya yazilamaz', async () => {
+    // Rakibe kotu puan birakma senaryosu
+    await assertFails(
+      setDoc(doc(asOwner(), 'ratings', REQ_DONE), rating({
+        collectorId: STRANGER,
+      })),
+    );
+  });
+
+  test('yildiz 1-5 disinda olamaz', async () => {
+    await assertFails(
+      setDoc(doc(asOwner(), 'ratings', REQ_DONE), rating({ stars: 6 })),
+    );
+    await assertFails(
+      setDoc(doc(asOwner(), 'ratings', REQ_DONE), rating({ stars: 0 })),
+    );
+  });
+
+  test('asiri uzun yorum reddedilir', async () => {
+    await assertFails(
+      setDoc(doc(asOwner(), 'ratings', REQ_DONE), rating({
+        comment: 'x'.repeat(301),
+      })),
+    );
+  });
+
+  test('verilen puan DEGISTIRILEMEZ ve SILINEMEZ', async () => {
+    await assertSucceeds(
+      setDoc(doc(asOwner(), 'ratings', REQ_DONE), rating()),
+    );
+    await assertFails(
+      updateDoc(doc(asOwner(), 'ratings', REQ_DONE), { stars: 1 }),
+    );
+    const { deleteDoc } = await import('firebase/firestore');
+    await assertFails(deleteDoc(doc(asOwner(), 'ratings', REQ_DONE)));
+  });
+
+  test('karne hesaplanabilsin diye puanlar okunabilir', async () => {
+    await assertSucceeds(
+      getDocs(
+        query(
+          collection(asStranger(), 'ratings'),
+          where('collectorId', '==', COLLECTOR),
+        ),
+      ),
+    );
+  });
 });

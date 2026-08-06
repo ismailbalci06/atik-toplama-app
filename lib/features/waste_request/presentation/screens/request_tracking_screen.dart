@@ -10,6 +10,8 @@ import '../../../../core/utils/map_utils.dart';
 import '../../../../core/utils/marker_icons.dart';
 import '../../../../core/widgets/premium_progress_bar.dart';
 import '../../../collector/presentation/widgets/arrival_celebration_dialog.dart';
+import '../../../reputation/presentation/providers/reputation_providers.dart';
+import '../../../reputation/presentation/widgets/rating_sheet.dart';
 import '../../domain/models/waste_request_model.dart';
 import '../providers/waste_request_providers.dart';
 
@@ -24,6 +26,67 @@ Future<void> openTracking(BuildContext context, WasteRequest request) {
   return Navigator.of(context).push(
     MaterialPageRoute(builder: (_) => RequestTrackingScreen(request: request)),
   );
+}
+
+/// Toplayici kartindaki guvenilirlik satiri.
+///
+/// Veri yoksa ya da toplayici henuz atanmadiysa notr bir etiket gosterir —
+/// olmayan bir puan UYDURMAZ. Ilk teslimatini yapan bir gorevli "Yeni
+/// görevli" olarak gorunur; bu, sahte bir 5 yildizdan daha durusttur.
+class _CollectorReputationLine extends ConsumerWidget {
+  const _CollectorReputationLine({required this.collectorId});
+
+  final String? collectorId;
+
+  @override
+  Widget build(BuildContext context, WidgetRef ref) {
+    final id = collectorId;
+    if (id == null || id.isEmpty) {
+      return Row(
+        children: [
+          const Icon(Icons.verified_user_outlined,
+              size: 14, color: AppColors.primary),
+          const SizedBox(width: 4),
+          Text('ATOS görevlisi',
+              style: TextStyle(fontSize: 13, color: Colors.grey.shade700)),
+        ],
+      );
+    }
+
+    final rep = ref.watch(collectorReputationProvider(id));
+
+    return Row(
+      children: [
+        if (rep.isNew) ...[
+          const Icon(Icons.verified_user_outlined,
+              size: 14, color: AppColors.primary),
+          const SizedBox(width: 4),
+          Text('Yeni görevli',
+              style: TextStyle(fontSize: 13, color: Colors.grey.shade700)),
+        ] else ...[
+          const Icon(Icons.star_rounded, size: 15, color: Color(0xFFF5A623)),
+          const SizedBox(width: 3),
+          Text(
+            rep.displayScore,
+            style: const TextStyle(
+              fontSize: 13,
+              fontWeight: FontWeight.w800,
+              color: AppColors.textPrimary,
+            ),
+          ),
+          const SizedBox(width: 6),
+          Flexible(
+            child: Text(
+              '· ${rep.label}',
+              maxLines: 1,
+              overflow: TextOverflow.ellipsis,
+              style: TextStyle(fontSize: 13, color: Colors.grey.shade700),
+            ),
+          ),
+        ],
+      ],
+    );
+  }
 }
 
 /// Takip ekraninin gorsel asamalari.
@@ -98,6 +161,10 @@ class _RequestTrackingScreenState extends ConsumerState<RequestTrackingScreen>
   /// Talebi alan toplayicinin GERCEK adi (Firestore'dan canli gelir)
   String? _liveCollectorName;
 
+  /// Talebi alan toplayicinin UID'si — guvenilirlik karnesi ve puanlama
+  /// icin gerekli (Firestore'dan canli gelir).
+  String? _liveCollectorId;
+
   /// Iptal istegi surerken butonu kilitler (cift gonderim olmasin)
   bool _cancelling = false;
 
@@ -159,9 +226,12 @@ class _RequestTrackingScreenState extends ConsumerState<RequestTrackingScreen>
 
   /// Firestore'dan her yeni talep anlik goruntusunde calisir.
   void _syncWithRequest(WasteRequest r) {
-    // Toplayici adini canli veriden al (talep alindiginda dolar)
+    // Toplayici kimligini canli veriden al (talep alindiginda dolar)
     if (r.collectorName != null && r.collectorName != _liveCollectorName) {
       _liveCollectorName = r.collectorName;
+    }
+    if (r.collectorId != null && r.collectorId != _liveCollectorId) {
+      _liveCollectorId = r.collectorId;
     }
 
     switch (r.status) {
@@ -357,6 +427,20 @@ class _RequestTrackingScreenState extends ConsumerState<RequestTrackingScreen>
           'Katkınız için teşekkürler! 🌱',
     );
 
+    // --- PUANLAMA DAVETI ---
+    // Kutlamanin hemen ardindan, deneyim tazeyken sorulur. Zorunlu degil:
+    // "Şimdi değil" ile gecilebilir (zorunlu puanlama rastgele yildiz
+    // uretir ve karneyi anlamsizlastirir).
+    final collectorId = _liveCollectorId;
+    if (mounted && collectorId != null && collectorId.isNotEmpty) {
+      await showRatingSheet(
+        context,
+        requestId: widget.request.id,
+        collectorId: collectorId,
+        collectorName: _collectorName,
+      );
+    }
+
     if (mounted) Navigator.of(context).pop();
   }
 
@@ -541,18 +625,10 @@ class _RequestTrackingScreenState extends ConsumerState<RequestTrackingScreen>
                             fontWeight: FontWeight.bold, fontSize: 15),
                       ),
                       const SizedBox(height: 2),
-                      Row(
-                        children: [
-                          const Icon(Icons.verified_user_outlined,
-                              size: 14, color: AppColors.primary),
-                          const SizedBox(width: 4),
-                          Text(
-                            'ATOS görevlisi',
-                            style: TextStyle(
-                                fontSize: 13, color: Colors.grey.shade700),
-                          ),
-                        ],
-                      ),
+                      // GERCEK guvenilirlik karnesi — sabit "ATOS görevlisi"
+                      // yazisinin yerini aldi. Puan uydurulmuyor, teslimat
+                      // sonrasi verilen yildizlardan turetiliyor.
+                      _CollectorReputationLine(collectorId: _liveCollectorId),
                     ],
                   ),
                 ),
