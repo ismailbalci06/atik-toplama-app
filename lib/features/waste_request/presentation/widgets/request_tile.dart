@@ -10,10 +10,19 @@ import '../../domain/models/waste_request_model.dart';
 /// Hem Ana Sayfa (son 3 talep) hem Talepler ekrani ayni bileseni kullanir;
 /// boylece iki yerde gorunum birebir ayni kalir.
 class RequestTile extends StatelessWidget {
-  const RequestTile({super.key, required this.request, this.onTap});
+  const RequestTile({
+    super.key,
+    required this.request,
+    this.onTap,
+    this.actionBadge,
+  });
 
   final WasteRequest request;
   final VoidCallback? onTap;
+
+  /// Durum rozetinden ONCE cizilen ek rozet (ornegin "Puanla" daveti ya da
+  /// verilmis yildiz). Bos birakilirsa hicbir sey cizilmez.
+  final Widget? actionBadge;
 
   @override
   Widget build(BuildContext context) {
@@ -71,6 +80,10 @@ class RequestTile extends StatelessWidget {
               ),
               const SizedBox(width: 8),
 
+              if (actionBadge != null) ...[
+                actionBadge!,
+                const SizedBox(width: 6),
+              ],
               badgeFor(request.status),
               // Ok isareti YALNIZCA gercekten tiklanabilirken cizilir;
               // aksi halde kullaniciya olmayan bir aksiyon vaat ediyorduk.
