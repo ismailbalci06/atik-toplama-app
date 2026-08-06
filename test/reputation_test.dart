@@ -6,7 +6,12 @@
 import 'package:atik_toplama_app/core/theme/app_theme.dart';
 import 'package:atik_toplama_app/features/reputation/domain/collector_reputation.dart';
 import 'package:atik_toplama_app/features/reputation/presentation/widgets/rating_sheet.dart';
+import 'package:atik_toplama_app/features/auth/presentation/providers/auth_providers.dart';
+import 'package:atik_toplama_app/features/reputation/presentation/providers/reputation_providers.dart';
+import 'package:atik_toplama_app/features/reputation/presentation/widgets/ratable_request_tile.dart';
+import 'package:atik_toplama_app/features/waste_request/domain/models/waste_request_model.dart';
 import 'package:flutter/material.dart';
+import 'package:google_maps_flutter/google_maps_flutter.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_test/flutter_test.dart';
 
@@ -19,6 +24,8 @@ Rating _rating(int stars) => Rating(
     );
 
 void main() {
+  _regression();
+
   group('CollectorReputation.compute', () {
     test('puan yoksa YENI GOREVLI — uydurma puan gosterilmez', () {
       final rep = CollectorReputation.compute(const []);
@@ -179,6 +186,98 @@ void main() {
       ));
 
       expect(find.text('Şimdi değil'), findsOneWidget);
+    });
+  });
+}
+
+// =====================================================================
+// REGRESYON — puanlama firsatinin KAYBOLMAMASI
+//
+// Bulunan kusur: puanlama formunun tek tetikleyicisi vardi (takip ekrani
+// ACIKKEN teslimatin tamamlandigini gormek). Kullanici sayfayi yenilerse
+// (Ctrl+F5), sekmeyi kapatirsa ya da teslimat baska ekrandayken
+// tamamlanirsa firsat KALICI OLARAK kayboluyordu — cunku tamamlanmis
+// talep openTracking tarafindan acilmiyor ve gecmis kartlari tiklanamiyordu.
+//
+// Bu testler kalici yolun (gecmis listesindeki "Puanla" daveti) var
+// oldugunu ve dogru talepte ciktigini garanti eder.
+
+WasteRequest _req(RequestStatus status, {String? collectorId}) => WasteRequest(
+      id: 'req-${status.name}',
+      userId: 'u1',
+      wasteTypes: const [WasteType.kagit],
+      estimatedKg: 50,
+      approxLocation: const LatLng(39.6, 32.1),
+      createdAt: DateTime.now(),
+      status: status,
+      collectorId: collectorId,
+      collectorName: 'Toplayici Bir',
+    );
+
+Widget _tileHost(WasteRequest r, {Rating? existing}) => ProviderScope(
+      overrides: [
+        currentUserIdProvider.overrideWithValue('u1'),
+        ratingForRequestProvider
+            .overrideWith((ref, id) => Stream.value(existing)),
+      ],
+      child: MaterialApp(
+        theme: AppTheme.light,
+        home: Scaffold(body: RatableRequestTile(request: r)),
+      ),
+    );
+
+void _regression() {
+  group('Puanlama firsati KAYBOLMAZ (regresyon)', () {
+    testWidgets('TAMAMLANMIS ve puanlanmamis teslimatta "Puanla" cikar',
+        (t) async {
+      await t.pumpWidget(
+        _tileHost(_req(RequestStatus.tamamlandi, collectorId: 'c1')),
+      );
+      await t.pump();
+
+      expect(find.text('Puanla'), findsOneWidget);
+      // Tiklanabilir olmali (ok isareti cizilir)
+      expect(find.byIcon(Icons.chevron_right), findsOneWidget);
+    });
+
+    testWidgets('ZATEN puanlanmissa davet YOK, verilen yildiz gorunur',
+        (t) async {
+      await t.pumpWidget(_tileHost(
+        _req(RequestStatus.tamamlandi, collectorId: 'c1'),
+        existing: Rating(
+          requestId: 'req-tamamlandi',
+          collectorId: 'c1',
+          raterId: 'u1',
+          stars: 4,
+          createdAt: DateTime.now(),
+        ),
+      ));
+      await t.pump();
+
+      expect(find.text('Puanla'), findsNothing);
+      expect(find.text('4'), findsOneWidget);
+      // Tekrar puanlama yok -> tiklanamaz
+      expect(find.byIcon(Icons.chevron_right), findsNothing);
+    });
+
+    testWidgets('IPTAL edilen talepte puanlama daveti YOK', (t) async {
+      await t.pumpWidget(_tileHost(_req(RequestStatus.iptal)));
+      await t.pump();
+      expect(find.text('Puanla'), findsNothing);
+    });
+
+    testWidgets('toplayicisi olmayan tamamlanmis kayitta davet YOK',
+        (t) async {
+      // Savunmaci: bozuk/eski veride collectorId bos olabilir
+      await t.pumpWidget(_tileHost(_req(RequestStatus.tamamlandi)));
+      await t.pump();
+      expect(find.text('Puanla'), findsNothing);
+    });
+
+    testWidgets('AKTIF talepte puanlama daveti YOK', (t) async {
+      await t.pumpWidget(_tileHost(_req(RequestStatus.yolda, collectorId: 'c1')));
+      await t.pump();
+      expect(find.text('Puanla'), findsNothing);
     });
   });
 }

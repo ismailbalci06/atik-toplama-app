@@ -11,7 +11,7 @@ import '../../../waste_request/domain/models/waste_request_model.dart';
 import '../../../waste_request/presentation/providers/waste_request_providers.dart';
 import '../../../waste_request/presentation/screens/request_tracking_screen.dart';
 import '../../../waste_request/presentation/screens/user_map_screen.dart';
-import '../../../waste_request/presentation/widgets/request_tile.dart';
+import '../../../reputation/presentation/widgets/ratable_request_tile.dart';
 
 /// Ana Sayfa — Hümeyra'nın dashboard tasarimi.
 ///
@@ -196,12 +196,12 @@ class DashboardScreen extends ConsumerWidget {
               ...requests.take(3).map(
                     (r) => Padding(
                       padding: const EdgeInsets.only(bottom: 10),
-                      child: RequestTile(
+                      child: RatableRequestTile(
                         request: r,
-                        // Aktif talep -> canli takip; gecmis talep -> pasif
-                        onTap: r.status.isActive
-                            ? () => openTracking(context, r)
-                            : null,
+                        // Aktif -> canli takip. Tamamlanmis -> puanlama
+                        // daveti (kalici yol; takip ekrani kapansa bile
+                        // puanlama firsati kaybolmaz).
+                        onTapActive: () => openTracking(context, r),
                       ),
                     ),
                   ),
