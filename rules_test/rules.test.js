@@ -752,3 +752,83 @@ describe('9) GUVENILIRLIK PUANI — ratings/{requestId}', () => {
     );
   });
 });
+
+// =====================================================================
+describe('10) TOPLAMA PLANLARI — schedules/{id}', () => {
+  const plan = (over = {}) => ({
+    userId: OWNER,
+    label: 'Aylik kagit toplama',
+    dayOfMonth: 3,
+    wasteTypes: ['kagit'],
+    estimatedKg: 120,
+    isActive: true,
+    ...over,
+  });
+
+  test('kullanici kendi planini olusturabilir', async () => {
+    await assertSucceeds(
+      setDoc(doc(asOwner(), 'schedules', 'p1'), plan()),
+    );
+  });
+
+  test('BASKASI adina plan olusturulamaz', async () => {
+    await assertFails(
+      setDoc(doc(asStranger(), 'schedules', 'p2'), plan()),
+    );
+  });
+
+  test('plan TICARI VERIDIR: baskasi okuyamaz (toplayici dahil)',
+    async () => {
+      await testEnv.withSecurityRulesDisabled(async (ctx) => {
+        await setDoc(doc(ctx.firestore(), 'schedules', 'p3'), plan());
+      });
+
+      await assertSucceeds(getDoc(doc(asOwner(), 'schedules', 'p3')));
+      await assertFails(getDoc(doc(asCollector(), 'schedules', 'p3')));
+      await assertFails(getDoc(doc(asStranger(), 'schedules', 'p3')));
+    });
+
+  test('ayin 28 inden buyuk gun kabul edilmez', async () => {
+    await assertFails(
+      setDoc(doc(asOwner(), 'schedules', 'p4'), plan({ dayOfMonth: 31 })),
+    );
+    await assertFails(
+      setDoc(doc(asOwner(), 'schedules', 'p5'), plan({ dayOfMonth: 0 })),
+    );
+  });
+
+  test('gecersiz miktar ve bos tur reddedilir', async () => {
+    await assertFails(
+      setDoc(doc(asOwner(), 'schedules', 'p6'), plan({ estimatedKg: 0 })),
+    );
+    await assertFails(
+      setDoc(doc(asOwner(), 'schedules', 'p7'), plan({ wasteTypes: [] })),
+    );
+  });
+
+  test('sahibi plani pasife alabilir', async () => {
+    await testEnv.withSecurityRulesDisabled(async (ctx) => {
+      await setDoc(doc(ctx.firestore(), 'schedules', 'p8'), plan());
+    });
+    await assertSucceeds(
+      updateDoc(doc(asOwner(), 'schedules', 'p8'), { isActive: false }),
+    );
+  });
+
+  test('plan BASKASININ ustune gecirilemez', async () => {
+    await testEnv.withSecurityRulesDisabled(async (ctx) => {
+      await setDoc(doc(ctx.firestore(), 'schedules', 'p9'), plan());
+    });
+    await assertFails(
+      updateDoc(doc(asOwner(), 'schedules', 'p9'), { userId: STRANGER }),
+    );
+  });
+
+  test('plan SILINEMEZ (pasife alinir)', async () => {
+    await testEnv.withSecurityRulesDisabled(async (ctx) => {
+      await setDoc(doc(ctx.firestore(), 'schedules', 'p10'), plan());
+    });
+    const { deleteDoc } = await import('firebase/firestore');
+    await assertFails(deleteDoc(doc(asOwner(), 'schedules', 'p10')));
+  });
+});

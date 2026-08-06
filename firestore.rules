@@ -309,6 +309,46 @@ service cloud.firestore {
       allow update, delete: if false;
     }
 
+    // =================================================================
+    // TOPLAMA PLANLARI — schedules/{scheduleId}
+    // =================================================================
+    // Tamamen KİŞİSEL veri: bir işletmenin hangi gün ne kadar atık
+    // verdiği, o işletmenin ticari ritmidir. Bu yüzden ödül/puan
+    // koleksiyonlarından farklı olarak okuma bile SAHİBİNE kapalıdır —
+    // başka hiçbir hesap (toplayıcı dahil) göremez.
+    match /schedules/{scheduleId} {
+
+      allow read: if request.auth != null
+                  && request.auth.uid == resource.data.userId;
+
+      allow create: if request.auth != null
+                    && request.auth.uid == request.resource.data.userId
+                    && request.resource.data.dayOfMonth is int
+                    && request.resource.data.dayOfMonth >= 1
+                    // 28 üst sınırı: 29/30/31 "olmayan gün" sorununu
+                    // çalışma anında değil tasarımda çözüyoruz.
+                    && request.resource.data.dayOfMonth <= 28
+                    && request.resource.data.wasteTypes is list
+                    && request.resource.data.wasteTypes.size() > 0
+                    && request.resource.data.estimatedKg is number
+                    && request.resource.data.estimatedKg > 0
+                    && request.resource.data.estimatedKg <= 1000
+                    && request.resource.data.isActive is bool;
+
+      // Sahibi planı düzenleyebilir; userId ve createdAt DEĞİŞTİRİLEMEZ
+      // (plan başkasının üstüne geçirilemez).
+      allow update: if request.auth != null
+                    && request.auth.uid == resource.data.userId
+                    && request.resource.data.userId == resource.data.userId
+                    && request.resource.data.diff(resource.data)
+                         .affectedKeys()
+                         .hasOnly(['label', 'dayOfMonth', 'wasteTypes',
+                                   'estimatedKg', 'isActive']);
+
+      // Silme yok: pasife alma (isActive:false) kullanılır.
+      allow delete: if false;
+    }
+
     // --- DİĞER TÜM KOLEKSİYONLAR ---
     // Varsayılan: kapalı. İleride yeni koleksiyon eklenirse kuralı
     // bilinçli olarak yazılmak zorunda kalınır (güvenli varsayılan).

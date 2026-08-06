@@ -9,6 +9,9 @@ import '../../../auth/presentation/providers/auth_providers.dart';
 import '../../../impact/domain/impact_stats.dart';
 import '../../../waste_request/domain/models/waste_request_model.dart';
 import '../../../waste_request/presentation/providers/waste_request_providers.dart';
+import '../../../schedule/domain/pickup_schedule.dart';
+import '../../../schedule/presentation/providers/schedule_providers.dart';
+import '../../../schedule/presentation/screens/schedule_screen.dart';
 import '../../../waste_request/presentation/screens/request_tracking_screen.dart';
 import '../../../waste_request/presentation/screens/user_map_screen.dart';
 import '../../../waste_request/presentation/widgets/request_tile.dart';
@@ -60,6 +63,21 @@ class DashboardScreen extends ConsumerWidget {
               children: [
                 const AtosLogo(height: 30),
                 const Spacer(),
+                // Toplama takvimi — alt navigasyona 6. sekme eklemek
+                // tasarimi sikistiracagi icin ust bara alindi.
+                IconButton(
+                  onPressed: () {
+                    Haptics.tap();
+                    Navigator.of(context).push(
+                      MaterialPageRoute(
+                          builder: (_) => const ScheduleScreen()),
+                    );
+                  },
+                  icon: const Icon(Icons.event_repeat_rounded, size: 20),
+                  color: AppColors.textSecondary,
+                  tooltip: 'Toplama Takvimi',
+                  visualDensity: VisualDensity.compact,
+                ),
                 TextButton.icon(
                   onPressed: () => _confirmSignOut(context, ref),
                   icon: const Icon(Icons.logout_rounded, size: 16),
@@ -90,6 +108,26 @@ class DashboardScreen extends ConsumerWidget {
                 onTap: () => openTracking(context, activeRequests.first),
               ),
             const SizedBox(height: 20),
+
+            // --- PLANLI TOPLAMA HATIRLATMASI ---
+            // Yalnizca gun yaklastiginda (<=3 gun) cikar; her zaman duran
+            // bir serit kisa surede gorunmez hale gelirdi.
+            ...(() {
+              final upcoming = ref.watch(upcomingScheduleProvider);
+              if (upcoming == null) return const <Widget>[];
+              return [
+                _ScheduleReminderBanner(
+                  schedule: upcoming,
+                  onCreate: () {
+                    Haptics.action();
+                    Navigator.of(context).push(
+                      MaterialPageRoute(builder: (_) => const UserMapScreen()),
+                    );
+                  },
+                ),
+                const SizedBox(height: 16),
+              ];
+            })(),
 
             // --- Kisisel etki basligi ---
             // KAPSAM UYARISI: asagidaki 3 kart SADECE bu kullanicinin
@@ -235,6 +273,91 @@ class DashboardScreen extends ConsumerWidget {
       // Oturumu kapat + provider onbelleklerini temizle + yigini bosalt
       await signOutAndReset(context, ref);
     }
+  }
+}
+
+/// PLANLI TOPLAMA hatirlatma seridi.
+///
+/// B2B degeri burada: tekrar eden is, tek dokunusla talebe donusuyor.
+/// Serit yalnizca gun yaklastiginda cizilir.
+class _ScheduleReminderBanner extends StatelessWidget {
+  const _ScheduleReminderBanner({
+    required this.schedule,
+    required this.onCreate,
+  });
+
+  final PickupSchedule schedule;
+  final VoidCallback onCreate;
+
+  @override
+  Widget build(BuildContext context) {
+    final today = schedule.daysUntil() == 0;
+
+    return Container(
+      padding: const EdgeInsets.fromLTRB(14, 12, 12, 12),
+      decoration: BoxDecoration(
+        color: today ? AppColors.successBg : AppColors.surface,
+        borderRadius: BorderRadius.circular(AppTheme.radiusCard),
+        border: Border.all(
+          color: today ? AppColors.primary : AppColors.border,
+          width: today ? 1.4 : 1,
+        ),
+        boxShadow: AppColors.softShadow,
+      ),
+      child: Row(
+        children: [
+          Container(
+            width: 42,
+            height: 42,
+            alignment: Alignment.center,
+            decoration: BoxDecoration(
+              color: today ? AppColors.surface : AppColors.successBg,
+              borderRadius: BorderRadius.circular(12),
+            ),
+            child: Text(
+              '${schedule.dayOfMonth}',
+              style: const TextStyle(
+                fontSize: 16,
+                fontWeight: FontWeight.w800,
+                color: AppColors.primaryDark,
+              ),
+            ),
+          ),
+          const SizedBox(width: 12),
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                Text(
+                  schedule.reminderText(),
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                  style: Theme.of(context).textTheme.titleSmall,
+                ),
+                const SizedBox(height: 2),
+                Text(
+                  schedule.summary,
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                  style: Theme.of(context).textTheme.bodySmall,
+                ),
+              ],
+            ),
+          ),
+          const SizedBox(width: 8),
+          FilledButton(
+            onPressed: onCreate,
+            style: FilledButton.styleFrom(
+              backgroundColor: AppColors.primary,
+              padding: const EdgeInsets.symmetric(horizontal: 14),
+              visualDensity: VisualDensity.compact,
+            ),
+            child: const Text('Talep aç'),
+          ),
+        ],
+      ),
+    );
   }
 }
 
