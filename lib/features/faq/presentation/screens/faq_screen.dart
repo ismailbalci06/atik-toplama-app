@@ -279,20 +279,30 @@ class _FaqSectionView extends StatelessWidget {
           ),
           Container(
             decoration: BoxDecoration(
-              color: AppColors.surface,
+              // DIKKAT: arka plan rengi BURADA verilmez.
+              // ExpansionTile icindeki ListTile, zeminini ve dokunma
+              // dalgasini (ink splash) en yakin Material uzerine cizer.
+              // Container'a renk verilirse o Material'in ustunu kapatir
+              // ve dokunma geri bildirimi GORUNMEZ olur (Flutter bunu
+              // hata ayiklama modunda assert ile uyarir; surum
+              // derlemesinde sessizce kaybolur).
+              // Bu yuzden rengi asagidaki Material sagliyor.
               borderRadius: BorderRadius.circular(AppTheme.radiusCard),
               border: Border.all(color: AppColors.border),
               boxShadow: AppColors.softShadow,
             ),
             child: ClipRRect(
               borderRadius: BorderRadius.circular(AppTheme.radiusCard),
-              child: Column(
-                children: [
-                  for (var i = 0; i < section.entries.length; i++) ...[
-                    if (i > 0) const Divider(height: 1),
-                    _FaqTile(entry: section.entries[i]),
+              child: Material(
+                color: AppColors.surface,
+                child: Column(
+                  children: [
+                    for (var i = 0; i < section.entries.length; i++) ...[
+                      if (i > 0) const Divider(height: 1),
+                      _FaqTile(entry: section.entries[i]),
+                    ],
                   ],
-                ],
+                ),
               ),
             ),
           ),
@@ -317,7 +327,16 @@ class _FaqTile extends StatelessWidget {
       child: ExpansionTile(
         tilePadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 2),
         childrenPadding: const EdgeInsets.fromLTRB(16, 0, 16, 16),
+
+        // HIZALAMA TUZAGI — ikisi birden gerekli:
+        // ExpansionTile cocuklarini bir Column'a, o Column'u da bir Align'a
+        // sarar. expandedCrossAxisAlignment yalnizca Column'un IC hizasini
+        // belirler; disaridaki Align'in varsayilani Alignment.center'dir.
+        // Bu yuzden UZUN metin (tum genisligi kapladigi icin) sola yasli
+        // gorunur ama KISA metin ortalanir. Cozum ikisini birden vermek.
+        expandedAlignment: Alignment.centerLeft,
         expandedCrossAxisAlignment: CrossAxisAlignment.start,
+
         iconColor: AppColors.primary,
         collapsedIconColor: AppColors.textSecondary,
         title: Text(
@@ -325,12 +344,18 @@ class _FaqTile extends StatelessWidget {
           style: Theme.of(context).textTheme.titleSmall,
         ),
         children: [
-          Text(
-            entry.answer,
-            style: Theme.of(context).textTheme.bodyMedium?.copyWith(
-                  color: AppColors.textSecondary,
-                  height: 1.55,
-                ),
+          // Genisligi acikca tam yapiyoruz: metnin kendisi de her zaman
+          // soldan baslasin, uzunlugundan bagimsiz olsun.
+          SizedBox(
+            width: double.infinity,
+            child: Text(
+              entry.answer,
+              textAlign: TextAlign.start,
+              style: Theme.of(context).textTheme.bodyMedium?.copyWith(
+                    color: AppColors.textSecondary,
+                    height: 1.55,
+                  ),
+            ),
           ),
         ],
       ),
