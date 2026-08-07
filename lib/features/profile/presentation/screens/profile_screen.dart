@@ -4,6 +4,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../../../../core/constants/app_colors.dart';
 import '../../../../core/theme/app_theme.dart';
 import '../../../auth/data/auth_repository.dart';
+import '../../../faq/presentation/screens/faq_screen.dart';
 import '../../../auth/presentation/providers/auth_providers.dart';
 import '../../../waste_request/domain/models/waste_request_model.dart';
 import '../../../waste_request/presentation/providers/waste_request_providers.dart';
@@ -159,6 +160,18 @@ class ProfileScreen extends ConsumerWidget {
 
           _MenuCard(
             children: [
+              _MenuItem(
+                icon: Icons.help_outline_rounded,
+                title: 'Sıkça Sorulan Sorular',
+                subtitle: 'Güvenlik, gizlilik ve puan sistemi',
+                onTap: () {
+                  Haptics.tap();
+                  Navigator.of(context).push(
+                    MaterialPageRoute(builder: (_) => const FaqScreen()),
+                  );
+                },
+              ),
+              const Divider(height: 1),
               _MenuItem(
                 icon: Icons.info_outline_rounded,
                 title: 'ATOS hakkında',
