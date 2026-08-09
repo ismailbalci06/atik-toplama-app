@@ -122,6 +122,16 @@ String _friendlyPhoneMessage(FirebaseAuthException error) {
           'tekrar deneyin.';
     case 'quota-exceeded':
       return 'SMS kotası doldu. Daha sonra tekrar deneyin.';
+    case 'billing-not-enabled':
+      // Firebase, GERCEK numaraya SMS gondermek icin Blaze (kullandikca
+      // ode) planini sart kosuyor. Console'da tanimli TEST numaralari ise
+      // gercek SMS uretmedigi icin ucretsiz planda calisir.
+      return 'Gerçek numaraya SMS gönderimi için Firebase projesinin '
+          'Blaze (kullandıkça öde) planında olması gerekiyor; proje şu an '
+          'ücretsiz planda.\n'
+          'Test için: Console → Authentication → Sign-in method → Phone → '
+          '"Phone numbers for testing" bölümünde tanımlı numarayı kullanın '
+          '(SMS gönderilmez, ücret çıkmaz).';
     case 'requires-recent-login':
       return 'Güvenlik için tekrar giriş yapmanız gerekiyor.';
     default:

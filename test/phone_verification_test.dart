@@ -116,6 +116,18 @@ void main() {
       expect(msg, contains('beklenmedik-kod'));
     });
 
+
+    test('faturalandirma hatasi ne yapilacagini soyler', () {
+      // Gercek numaraya SMS Blaze plani ister; test numarasi istemez.
+      // Canlida bu kod alindi, mesaj eyleme donuk olmali.
+      final msg = phoneAuthMessage(
+        FirebaseAuthException(code: 'billing-not-enabled'),
+      );
+      expect(msg, contains('Blaze'));
+      expect(msg, contains('Phone numbers for testing'));
+      expect(msg, contains('billing-not-enabled'), reason: 'ham kod da gorunmeli');
+    });
+
     test('oturum yoksa anlasilir uyari', () {
       final msg = phoneAuthMessage(StateError('önce giriş yapmalısınız.'));
       expect(msg, contains('giriş'));
