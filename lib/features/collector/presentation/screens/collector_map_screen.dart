@@ -106,6 +106,26 @@ class _CollectorMapScreenState extends ConsumerState<CollectorMapScreen>
   /// Kesintiden sonra ayni gorevi tekrar tekrar surdurmeye calismayi onler
   String? _resumedRequestId;
 
+  /// AKILLI GUZERGAH — gercek yol geometrisi.
+  ///
+  /// Bos oldugu surece duraklar arasi duz cizgi cizilir (eski davranis);
+  /// OSRM yanit verince cizgi yollara oturur. Anahtar, guzergahin
+  /// degisip degismedigini anlamak icin: duraklar veya aracin konumu
+  /// degistiginde yeniden istenir.
+  List<LatLng>? _smartRoadPath;
+  String? _smartRouteKey;
+
+  /// Guzergah icin gercek yol rotasini arka planda getirir.
+  ///
+  /// build() sirasinda cagrilir ama setState'i ancak await'ten SONRA
+  /// yapar; boylece "build sirasinda setState" hatasi olusmaz.
+  Future<void> _fetchSmartRoadPath(String key, List<LatLng> waypoints) async {
+    _smartRouteKey = key; // tekrar tekrar istememek icin hemen isaretle
+    final path = await ref.read(routingServiceProvider).roadRouteVia(waypoints);
+    if (!mounted || _smartRouteKey != key) return;
+    setState(() => _smartRoadPath = path);
+  }
+
   @override
   void initState() {
     super.initState();
@@ -702,6 +722,21 @@ class _CollectorMapScreenState extends ConsumerState<CollectorMapScreen>
             ? RouteOptimizer.nearestNeighbor(_collectorPosition, pendingRequests)
             : null;
 
+    // GERCEK YOL GUZERGAHI: duraklar degistiyse arka planda iste.
+    // Gelene kadar duz cizgi cizilir; yanit gelince yollara oturur.
+    if (optimized != null) {
+      final key = optimized.pathPoints.map((p) =>
+          '${p.latitude.toStringAsFixed(4)},'
+          '${p.longitude.toStringAsFixed(4)}').join('|');
+      if (key != _smartRouteKey) {
+        _fetchSmartRoadPath(key, optimized.pathPoints);
+      }
+    } else if (_smartRoadPath != null) {
+      // Guzergah artik gecerli degil (yola cikildi veya tek talep kaldi)
+      _smartRoadPath = null;
+      _smartRouteKey = null;
+    }
+
     // Haritada gosterilecek tum cizgiler: aktif teslimat rotasi +
     // (varsa) akilli toplama guzergahi
     final polylines = <Polyline>{
@@ -709,7 +744,8 @@ class _CollectorMapScreenState extends ConsumerState<CollectorMapScreen>
       if (optimized != null)
         Polyline(
           polylineId: const PolylineId('optimized-route'),
-          points: optimized.pathPoints,
+          // Gercek yol gelmediyse duz cizgiye duser — cizgi kaybolmaz
+          points: _smartRoadPath ?? optimized.pathPoints,
           color: AppColors.neon,
           width: 4,
           patterns: [PatternItem.dot, PatternItem.gap(12)],

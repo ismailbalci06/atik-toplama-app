@@ -29,6 +29,7 @@ RoutingService _servis(RouteFetcher f, {Duration? timeout}) => RoutingService(
     );
 
 void main() {
+  _guzergahTestleri();
   setUp(RoutingService.clearCache);
 
   group('GeoJSON cozumleme', () {
@@ -146,6 +147,63 @@ void main() {
       expect(r.length, greaterThanOrEqualTo(2));
       // Rotanin ucu hedefe komsu olmali ki cizgi havada bitmesin
       expect(MapUtils.distanceKm(r.last, _to), lessThan(1.0));
+    });
+  });
+}
+
+// =====================================================================
+// COK DURAKLI GUZERGAH — akilli toplama rotasi
+// =====================================================================
+void _guzergahTestleri() {
+  const a = LatLng(39.61, 32.18);
+  const b = LatLng(39.59, 32.16);
+  const c = LatLng(39.57, 32.14);
+
+  group('roadRouteVia', () {
+    setUp(RoutingService.clearCache);
+
+    test('TEK istekle tum duraklar gonderilir', () async {
+      late Uri cagrilan;
+      await _servis((u) async {
+        cagrilan = u;
+        return _basariliYanit;
+      }).roadRouteVia([a, b, c]);
+
+      // Uc durak da ayni yolda, noktali virgulle ayrilmis olmali
+      expect(';'.allMatches(cagrilan.path).length, 2,
+          reason: 'her bacak icin ayri istek atilmamali');
+      expect(cagrilan.path, contains('32.18,39.61'));
+      expect(cagrilan.path, contains('32.14,39.57'));
+    });
+
+    test('basarili yanitta yol geometrisi doner', () async {
+      final r = await _servis((_) async => _basariliYanit)
+          .roadRouteVia([a, b, c]);
+      expect(r.length, 5);
+    });
+
+    test('HATA durumunda duraklarin KENDISI doner (duz cizgi)', () async {
+      final r = await _servis((_) async => throw Exception('servis kapali'))
+          .roadRouteVia([a, b, c]);
+      expect(r, [a, b, c], reason: 'cizgi kaybolmamali');
+    });
+
+    test('zaman asiminda da duz cizgiye duser', () async {
+      final r = await _servis(
+        (_) => Future.delayed(const Duration(seconds: 30), () => _basariliYanit),
+        timeout: const Duration(milliseconds: 120),
+      ).roadRouteVia([a, b, c]);
+      expect(r, [a, b, c]);
+    });
+
+    test('tek nokta verilirse ag cagrisi YAPILMAZ', () async {
+      var cagri = 0;
+      final r = await _servis((_) async {
+        cagri++;
+        return _basariliYanit;
+      }).roadRouteVia([a]);
+      expect(cagri, 0);
+      expect(r, [a]);
     });
   });
 }

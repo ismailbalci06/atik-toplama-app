@@ -81,6 +81,40 @@ class RoutingService {
     }
   }
 
+  /// COK DURAKLI gercek yol rotasi (akilli toplama guzergahi icin).
+  ///
+  /// OSRM tek istekte birden fazla ara nokta kabul ettigi icin N duraklik
+  /// guzergah TEK cagriyla alinir; her bacak icin ayri istek atmak hem
+  /// yavas olurdu hem de servise gereksiz yuk bindirirdi.
+  ///
+  /// Hata durumunda [waypoints] listesinin KENDISI dondurulur — yani
+  /// bugunku duz cizgi davranisi. Cizgi hicbir kosulda kaybolmaz.
+  Future<List<LatLng>> roadRouteVia(List<LatLng> waypoints) async {
+    if (waypoints.length < 2) return waypoints;
+
+    final key = waypoints.map(_coord).join(';');
+    final onbellek = _cache[key];
+    if (onbellek != null) return onbellek;
+
+    try {
+      final path = waypoints.map(_coord).join(';');
+      final uri = Uri.parse('$_base/$path?overview=full&geometries=geojson');
+
+      final body = await _fetch(uri).timeout(timeout);
+      final points = parseGeoJson(body);
+      if (points.length < 2) throw const FormatException('rota bos');
+
+      _cache[key] = points;
+      return points;
+    } catch (e) {
+      debugPrint('🗺️ Guzergah alinamadi, duz cizgiye dusuldu: $e');
+      return waypoints;
+    }
+  }
+
+  /// OSRM koordinat bicimi: BOYLAM,ENLEM
+  static String _coord(LatLng p) => '${p.longitude},${p.latitude}';
+
   /// OSRM GeoJSON yanitindan koordinat listesi cikarir.
   ///
   /// SAF fonksiyon: ag, zaman ve Firebase'e bagimli degildir — bu yuzden
