@@ -8,6 +8,7 @@ import '../../../../core/theme/app_theme.dart';
 import '../../../../core/utils/error_utils.dart';
 import '../../../../core/utils/map_utils.dart';
 import '../../../../core/utils/marker_icons.dart';
+import '../../../../core/utils/routing_providers.dart';
 import '../../../../core/widgets/premium_progress_bar.dart';
 import '../../../collector/presentation/widgets/arrival_celebration_dialog.dart';
 import '../../../reputation/presentation/providers/reputation_providers.dart';
@@ -273,6 +274,8 @@ class _RequestTrackingScreenState extends ConsumerState<RequestTrackingScreen>
       final start = _routeStart;
       if (start != null) {
         _routePoints = MapUtils.buildCurvedRoute(start, exact);
+        // Adres sonradan netlesti -> gercek yol rotasini da yenile
+        _fetchRoadRoute(start, exact);
         _totalKm = MapUtils.distanceKm(start, exact);
       }
     });
@@ -340,10 +343,13 @@ class _RequestTrackingScreenState extends ConsumerState<RequestTrackingScreen>
     // ekranda CIZGI BIREBIR AYNI olur.
     if (_routeStart == null) {
       _routeStart = live;
+      // Once kavisli cizgi ciziliyor ki harita bir an bile bos kalmasin;
+      // gercek yol rotasi gelince cizgi sessizce degistirilir.
       _routePoints = MapUtils.buildCurvedRoute(live, _destination);
       _totalKm = MapUtils.distanceKm(live, _destination);
       _from = live;
       _to = live;
+      _fetchRoadRoute(live, _destination);
 
       // Rotanin tamamini guvenli sekilde cerceve icine al
       _mapController?.animateCamera(
@@ -372,6 +378,21 @@ class _RequestTrackingScreenState extends ConsumerState<RequestTrackingScreen>
       _lastCameraMove = now;
       _mapController?.animateCamera(CameraUpdate.newLatLng(live));
     }
+  }
+
+  /// GERCEK yol rotasini arka planda getirir ve cizgiyi degistirir.
+  ///
+  /// BURADA yolculuk sirasinda degistirmek GUVENLI: bu ekranda rota
+  /// yalnizca CIZGI olarak kullanilir; aracin konumu Firestore'dan gelen
+  /// canli veriden hesaplanir. (Toplayici ekraninda ise rota animasyonun
+  /// kaynagidir, orada yolculuk baslamadan once hazir edilir.)
+  ///
+  /// Mesafe/ETA hesabina DOKUNULMAZ: ilerleme cubugu kus ucusu kalan
+  /// mesafeye dayaniyor; yol mesafesiyle karistirmak oranı bozardi.
+  Future<void> _fetchRoadRoute(LatLng from, LatLng to) async {
+    final points = await ref.read(routingServiceProvider).roadRoute(from, to);
+    if (!mounted || points.length < 2) return;
+    setState(() => _routePoints = points);
   }
 
   /// Iki konum arasinda yumusatilmis ANLIK arac konumu

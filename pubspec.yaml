@@ -30,6 +30,7 @@ dependencies:
   # --- Yardimci ---
   uuid: ^4.4.0                # Talepler icin benzersiz ID uretimi
   intl: ^0.19.0               # Tarih/saat formatlama
+  http: ^1.2.0                # OSRM yol tarifi servisine istek
 
 dev_dependencies:
   flutter_test:

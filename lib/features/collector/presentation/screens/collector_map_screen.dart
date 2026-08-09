@@ -9,6 +9,7 @@ import '../../../../core/utils/error_utils.dart';
 import '../../../../core/utils/map_utils.dart';
 import '../../../../core/utils/marker_icons.dart';
 import '../../../../core/utils/route_optimizer.dart';
+import '../../../../core/utils/routing_providers.dart';
 import '../../../../core/widgets/premium_progress_bar.dart';
 import '../../../auth/presentation/providers/auth_providers.dart';
 import '../../../reputation/presentation/providers/reputation_providers.dart';
@@ -542,13 +543,23 @@ class _CollectorMapScreenState extends ConsumerState<CollectorMapScreen>
   /// [destination] TAM adrestir ve YALNIZCA talep basariyla uzerimize
   /// alindiktan sonra elde edilebilir (korumali detay dokumani). Yani
   /// rota, maskenin sunucuda kalkmasindan sonra cizilir.
-  void _startTrip(
+  Future<void> _startTrip(
     WasteRequest request,
     LatLng destination, {
     bool resumed = false,
-  }) {
+  }) async {
+    // GERCEK YOL ROTASI. Animasyon bu listeyi takip ettigi icin rota
+    // yolculuk BASLAMADAN once hazir olmali; sonradan degistirmek araci
+    // yol ortasinda ziplatirdi.
+    //
+    // Kilitlenme riski yok: RoutingService kisa bir zaman asimiyla
+    // sinirlidir ve her hatada kavisli cizgiye duser.
     final routePoints =
-        MapUtils.buildCurvedRoute(_collectorPosition, destination);
+        await ref.read(routingServiceProvider).roadRoute(
+              _collectorPosition,
+              destination,
+            );
+    if (!mounted) return;
 
     setState(() {
       _activeRequest = request;
