@@ -17,10 +17,13 @@ import 'package:firebase_auth/firebase_auth.dart';
 /// tabanli akis). Uygulama web'de yayinlandigi icin hedefimiz budur;
 /// mobil derlemede cagrilirsa anlasilir bir hata mesajina donusur.
 class PhoneVerificationRepository {
-  PhoneVerificationRepository({FirebaseAuth? auth})
-      : _auth = auth ?? FirebaseAuth.instance;
+  PhoneVerificationRepository({FirebaseAuth? auth}) : _authOverride = auth;
 
-  final FirebaseAuth _auth;
+  final FirebaseAuth? _authOverride;
+
+  /// TEMBEL erisim — yapicida Firebase'e dokunmuyoruz ki sinif saf
+  /// birim testlerinde de olusturulabilsin.
+  FirebaseAuth get _auth => _authOverride ?? FirebaseAuth.instance;
 
   /// Oturumdaki hesaba telefon baglama akisini BASLATIR.
   ///

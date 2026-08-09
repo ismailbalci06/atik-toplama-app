@@ -6,12 +6,16 @@
 import 'package:atik_toplama_app/features/verification/data/phone_verification_repository.dart';
 import 'package:atik_toplama_app/features/verification/domain/tr_phone.dart';
 import 'package:atik_toplama_app/features/verification/presentation/screens/phone_verification_screen.dart';
+import 'package:atik_toplama_app/features/auth/presentation/screens/register_screen.dart';
+import 'package:atik_toplama_app/features/verification/data/signup_with_phone_repository.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_test/flutter_test.dart';
 
 void main() {
+  _signupTests();
+
   group('TrPhone.normalize — kullanicinin yazdigi her bicim', () {
     const beklenen = '+905321234567';
 
@@ -167,6 +171,71 @@ void main() {
       await t.pump();
 
       expect(find.textContaining('diğer kullanıcılara'), findsOneWidget);
+    });
+  });
+}
+
+// =====================================================================
+// KAYIT AKISI — telefon zorunlulugu ve sira/geri alma
+// =====================================================================
+void _signupTests() {
+  group('Kayit ekrani — telefon ZORUNLU', () {
+    Widget host() => const ProviderScope(
+          child: MaterialApp(home: RegisterScreen()),
+        );
+
+    testWidgets('formda cep telefonu alani var', (t) async {
+      t.view.physicalSize = const Size(430, 1600);
+      t.view.devicePixelRatio = 1.0;
+      addTearDown(t.view.reset);
+
+      await t.pumpWidget(host());
+      await t.pump();
+
+      expect(find.text('CEP TELEFONU'), findsOneWidget);
+      expect(find.text('0532 123 45 67'), findsOneWidget); // ipucu metni
+    });
+
+    testWidgets('gecersiz numarada form dogrulamasi UYARIR', (t) async {
+      t.view.physicalSize = const Size(430, 1600);
+      t.view.devicePixelRatio = 1.0;
+      addTearDown(t.view.reset);
+
+      await t.pumpWidget(host());
+      await t.pump();
+
+      // Sabit hat girip gonderelim
+      await t.enterText(
+          find.widgetWithText(TextFormField, '0532 123 45 67'), '0212 123 45 67');
+      await t.pump();
+      await t.tap(find.text('Hesap Oluştur'));
+      await t.pump();
+
+      expect(find.textContaining('5 ile başlar'), findsOneWidget);
+    });
+
+    testWidgets('gecerli numarada "Doğrulanacak: +90..." gorunur', (t) async {
+      t.view.physicalSize = const Size(430, 1600);
+      t.view.devicePixelRatio = 1.0;
+      addTearDown(t.view.reset);
+
+      await t.pumpWidget(host());
+      await t.pump();
+
+      await t.enterText(
+          find.widgetWithText(TextFormField, '0532 123 45 67'), '0532 123 45 67');
+      await t.pump();
+
+      // Firebase'e TAM OLARAK ne gidecegi ekranda yaziyor
+      expect(find.textContaining('+905321234567'), findsOneWidget);
+    });
+  });
+
+  group('Kayit sirasi ve geri alma sozlesmesi', () {
+    test('kod adiminda vazgecilirse hesap SILINMEZ', () {
+      // Gecerli bir hesap vardir; telefon Profil'den sonra dogrulanabilir.
+      // Calisan hesabi vazgecme yuzunden yok etmek daha buyuk risk olurdu.
+      expect(SignUpWithPhoneRepository().keepsAccountOnAbandon, isTrue);
     });
   });
 }

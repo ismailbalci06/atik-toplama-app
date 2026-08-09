@@ -1,6 +1,7 @@
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../../data/phone_verification_repository.dart';
+import '../../data/signup_with_phone_repository.dart';
 
 final phoneVerificationRepositoryProvider =
     Provider<PhoneVerificationRepository>(
@@ -16,3 +17,8 @@ final phoneVerificationRepositoryProvider =
 final verifiedPhoneProvider = StreamProvider.autoDispose<String?>((ref) {
   return ref.watch(phoneVerificationRepositoryProvider).watchVerifiedPhone();
 });
+
+/// Telefon dogrulamali kayit akisinin sira/geri alma mantigi.
+final signUpWithPhoneRepositoryProvider = Provider<SignUpWithPhoneRepository>(
+  (ref) => SignUpWithPhoneRepository(),
+);

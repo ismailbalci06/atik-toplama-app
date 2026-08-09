@@ -1,3 +1,8 @@
+import 'package:firebase_auth/firebase_auth.dart';
+import 'package:flutter/services.dart';
+import '../../../verification/data/phone_verification_repository.dart';
+import '../../../verification/domain/tr_phone.dart';
+import '../../../verification/presentation/providers/verification_providers.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
@@ -26,9 +31,18 @@ class _RegisterScreenState extends ConsumerState<RegisterScreen> {
   final _passwordController = TextEditingController();
   final _password2Controller = TextEditingController();
 
+  final _phoneController = TextEditingController();
+  final _codeController = TextEditingController();
+
   bool _obscure = true;
   bool _busy = false;
   String? _error;
+
+  /// SMS gonderildiyse dolu olur -> ekran KOD adimina gecer
+  ConfirmationResult? _confirmation;
+
+  /// Kod adiminda gosterilecek maskeli numara
+  String? _sentTo;
 
   @override
   void dispose() {
@@ -36,35 +50,118 @@ class _RegisterScreenState extends ConsumerState<RegisterScreen> {
     _emailController.dispose();
     _passwordController.dispose();
     _password2Controller.dispose();
+    _phoneController.dispose();
+    _codeController.dispose();
     super.dispose();
   }
 
+  /// KAYIT — iki asamali, geri alma korumali.
+  ///
+  /// 1. Hesabi olustur (e-postanin musait oldugu BURADA anlasilir; degilse
+  ///    hic SMS gonderilmez, kota harcanmaz, yarim kayit olusmaz).
+  /// 2. Ayni hesaba telefonu bagla -> SMS gonder.
+  ///    Bu adim hic baslatilamazsa yeni hesap GERI ALINIR (silinir).
+  ///
+  /// Not: "once SMS, sonra hesap" sirasi Firebase'de yetim hesap uretir —
+  /// confirm() kullaniciyi telefon hesabiyla oturum actirir, ardindan
+  /// createUser... ikinci bir hesap acar. Gerekce: SignUpWithPhoneRepository.
   Future<void> _submit() async {
     if (!_formKey.currentState!.validate()) return;
+    final e164 = TrPhone.normalize(_phoneController.text);
+    if (e164 == null) return;
+
     FocusScope.of(context).unfocus();
     Haptics.action();
-
     setState(() {
       _busy = true;
       _error = null;
     });
 
+    // --- Adim 1: hesap ---
     try {
       await ref.read(authRepositoryProvider).register(
             name: _nameController.text,
             email: _emailController.text,
             password: _passwordController.text,
           );
-      // Kayit sonrasi Firebase oturumu acar -> AuthGate ekrani degistirir.
-      // Giris ekranindan buraya push edildigimiz icin yigini temizliyoruz.
-      if (mounted) Navigator.of(context).pop();
     } on AuthFailure catch (e) {
-      if (mounted) setState(() => _error = e.message);
+      if (mounted) {
+        setState(() {
+          _busy = false;
+          _error = e.message;
+        });
+      }
+      return;
     } catch (_) {
-      if (mounted) setState(() => _error = 'Beklenmeyen bir hata oluştu.');
-    } finally {
-      if (mounted) setState(() => _busy = false);
+      if (mounted) {
+        setState(() {
+          _busy = false;
+          _error = 'Beklenmeyen bir hata oluştu.';
+        });
+      }
+      return;
     }
+
+    // --- Adim 2: telefon baglama (basarisiz olursa hesap geri alinir) ---
+    try {
+      final confirmation = await ref
+          .read(signUpWithPhoneRepositoryProvider)
+          .startPhoneLinkOrRollback(e164);
+      if (!mounted) return;
+      setState(() {
+        _confirmation = confirmation;
+        _sentTo = TrPhone.mask(e164);
+        _busy = false;
+      });
+    } catch (e) {
+      if (!mounted) return;
+      setState(() {
+        _busy = false;
+        _error = '${phoneAuthMessage(e)}\n\n'
+            'Kaydınız tamamlanmadı ve geri alındı; aynı e-posta ile '
+            'tekrar deneyebilirsiniz.';
+      });
+    }
+  }
+
+  /// Kod adimi — numarayi hesaba baglar ve kaydi tamamlar.
+  Future<void> _confirmCode() async {
+    final confirmation = _confirmation;
+    if (confirmation == null) return;
+
+    Haptics.action();
+    setState(() {
+      _busy = true;
+      _error = null;
+    });
+
+    try {
+      await ref.read(phoneVerificationRepositoryProvider).confirmCode(
+            confirmation,
+            _codeController.text.trim(),
+          );
+      if (!mounted) return;
+      Haptics.success();
+      // Oturum zaten acik; AuthGate'i serbest birakmak icin yigini bosalt.
+      Navigator.of(context).pop();
+    } catch (e) {
+      if (!mounted) return;
+      setState(() {
+        _busy = false;
+        _error = phoneAuthMessage(e);
+      });
+    }
+  }
+
+  /// Kod adiminda vazgecme — hesap SILINMEZ.
+  ///
+  /// Bu noktada gecerli bir hesap vardir ve oturum aciktir. Calisan bir
+  /// hesabi vazgecme yuzunden yok etmek, geri almanin cozdugu sorundan
+  /// daha buyuk bir veri kaybi riski olurdu. Telefon Profil ekranindan
+  /// istendigi zaman dogrulanabilir.
+  void _skipVerification() {
+    Haptics.tap();
+    Navigator.of(context).pop();
   }
 
   /// Google ile kayit/giris — Firebase hesabi yoksa otomatik olusturur
@@ -113,6 +210,11 @@ class _RegisterScreenState extends ConsumerState<RegisterScreen> {
                     const Center(child: AtosLogo(height: 54)),
                     const SizedBox(height: 26),
 
+                    // ADIM 2 — SMS gonderildi, kod bekleniyor.
+                    // Form alanlari gizlenir; hesap zaten olusmustur.
+                    if (_confirmation != null) ...[
+                      ..._buildCodeStep(context, text),
+                    ] else ...[
                     Text('Hesap oluşturun', style: text.headlineSmall),
                     const SizedBox(height: 4),
                     Text(
@@ -161,6 +263,49 @@ class _RegisterScreenState extends ConsumerState<RegisterScreen> {
                         return null;
                       },
                     ),
+                    const SizedBox(height: 16),
+
+                    // --- Cep telefonu (ZORUNLU) ---
+                    // B2B kurumsal kimlik icin zorunlu. Numara E.164'e
+                    // cevrilerek Firebase'e gider; alttaki satir tam olarak
+                    // ne gonderilecegini gosterir.
+                    const FieldLabel('CEP TELEFONU'),
+                    TextFormField(
+                      controller: _phoneController,
+                      keyboardType: TextInputType.phone,
+                      textInputAction: TextInputAction.next,
+                      onChanged: (_) => setState(() {}),
+                      inputFormatters: [
+                        FilteringTextInputFormatter.allow(RegExp(r'[0-9 +]')),
+                        LengthLimitingTextInputFormatter(20),
+                      ],
+                      decoration: const InputDecoration(
+                        hintText: '0532 123 45 67',
+                        prefixIcon: Icon(Icons.phone_iphone_rounded, size: 20),
+                      ),
+                      validator: (v) => TrPhone.isValid(v ?? '')
+                          ? null
+                          : 'Geçerli bir cep numarası girin (5 ile başlar)',
+                    ),
+                    if (TrPhone.isValid(_phoneController.text)) ...[
+                      const SizedBox(height: 6),
+                      Row(
+                        children: [
+                          const Icon(Icons.check_circle_outline_rounded,
+                              size: 14, color: AppColors.successInk),
+                          const SizedBox(width: 6),
+                          Text(
+                            'Doğrulanacak: '
+                            '${TrPhone.normalize(_phoneController.text)}',
+                            style: const TextStyle(
+                              fontSize: 12,
+                              fontWeight: FontWeight.w700,
+                              color: AppColors.successInk,
+                            ),
+                          ),
+                        ],
+                      ),
+                    ],
                     const SizedBox(height: 16),
 
                     // --- Sifre ---
@@ -257,6 +402,7 @@ class _RegisterScreenState extends ConsumerState<RegisterScreen> {
                         child: const Text('Zaten hesabım var · Giriş yap'),
                       ),
                     ),
+                    ], // <- adim 1 (form) sonu
                   ],
                 ),
               ),
@@ -266,4 +412,86 @@ class _RegisterScreenState extends ConsumerState<RegisterScreen> {
       ),
     );
   }
+
+  /// ADIM 2 arayuzu — SMS kodu girisi.
+  ///
+  /// Hesap bu noktada ZATEN OLUSMUSTUR ve oturum aciktir. Kullanici
+  /// vazgecerse hesap silinmez; telefonu Profil'den sonra dogrulayabilir.
+  List<Widget> _buildCodeStep(BuildContext context, TextTheme text) {
+    return [
+      Text('Telefonunuzu doğrulayın', style: text.headlineSmall),
+      const SizedBox(height: 4),
+      Text(
+        'Hesabınız oluşturuldu. $_sentTo numarasına gönderdiğimiz '
+        '6 haneli kodu girin.',
+        style: text.bodySmall,
+      ),
+      const SizedBox(height: 22),
+
+      TextField(
+        controller: _codeController,
+        keyboardType: TextInputType.number,
+        autofocus: true,
+        enabled: !_busy,
+        onChanged: (_) => setState(() {}),
+        textAlign: TextAlign.center,
+        style: const TextStyle(
+          fontSize: 24,
+          fontWeight: FontWeight.w800,
+          letterSpacing: 8,
+        ),
+        inputFormatters: [
+          FilteringTextInputFormatter.digitsOnly,
+          LengthLimitingTextInputFormatter(6),
+        ],
+        decoration: const InputDecoration(
+          hintText: '••••••',
+          counterText: '',
+        ),
+      ),
+      const SizedBox(height: 20),
+
+      SizedBox(
+        height: 52,
+        child: ElevatedButton(
+          onPressed: (_busy || _codeController.text.trim().length != 6)
+              ? null
+              : _confirmCode,
+          child: _busy
+              ? const SizedBox(
+                  width: 20,
+                  height: 20,
+                  child: CircularProgressIndicator(
+                      strokeWidth: 2.2, color: Colors.white),
+                )
+              : const Text('Doğrula ve Bitir'),
+        ),
+      ),
+      const SizedBox(height: 6),
+      Center(
+        child: TextButton(
+          onPressed: _busy ? null : _skipVerification,
+          style: TextButton.styleFrom(foregroundColor: AppColors.textSecondary),
+          child: const Text('Daha sonra doğrula'),
+        ),
+      ),
+      const SizedBox(height: 10),
+      Row(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          const Icon(Icons.info_outline_rounded,
+              size: 15, color: AppColors.textSecondary),
+          const SizedBox(width: 8),
+          Expanded(
+            child: Text(
+              'Hesabınız hazır; şimdi doğrulamazsanız Profil ekranından '
+              'istediğiniz zaman doğrulayabilirsiniz.',
+              style: text.bodySmall,
+            ),
+          ),
+        ],
+      ),
+    ];
+  }
+
 }
