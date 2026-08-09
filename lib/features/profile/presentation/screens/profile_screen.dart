@@ -5,6 +5,10 @@ import '../../../../core/constants/app_colors.dart';
 import '../../../../core/theme/app_theme.dart';
 import '../../../auth/data/auth_repository.dart';
 import '../../../faq/presentation/screens/faq_screen.dart';
+import '../../../verification/domain/tr_phone.dart';
+import '../../../verification/presentation/providers/verification_providers.dart';
+import '../../../verification/presentation/screens/phone_verification_screen.dart';
+
 import '../../../auth/presentation/providers/auth_providers.dart';
 import '../../../waste_request/domain/models/waste_request_model.dart';
 import '../../../waste_request/presentation/providers/waste_request_providers.dart';
@@ -142,6 +146,11 @@ class ProfileScreen extends ConsumerWidget {
                 subtitle: 'E-postanıza sıfırlama bağlantısı gönderilir',
                 onTap: () => _resetPassword(context, ref, user?.email),
               ),
+              const Divider(height: 1),
+              // TELEFON DOGRULAMA — opsiyonel.
+              // Rozet bizim tuttugumuz bir bayrak degil: Firebase Auth'un
+              // kendi `user.phoneNumber` kaydidir, uygulamadan yazilamaz.
+              _PhoneVerificationRow(),
               const Divider(height: 1),
               _MenuItem(
                 icon: Icons.badge_outlined,
@@ -372,6 +381,89 @@ class _MenuItem extends StatelessWidget {
           ? null
           : const Icon(Icons.chevron_right,
               size: 20, color: AppColors.textSecondary),
+    );
+  }
+}
+
+/// Telefon dogrulama satiri — durumuna gore iki yuzu vardir:
+///   • dogrulanmis  -> maskeli numara + yesil "Doğrulanmış" rozeti
+///   • dogrulanmamis-> dogrulama ekranina davet
+///
+/// Rozetin kaynagi Firebase Auth'un `user.phoneNumber` alanidir. Bu alan
+/// uygulamadan yazilamaz; yalnizca SMS dogrulamasi basarili olunca kimlik
+/// saglayicisi tarafindan doldurulur. Yani "Doğrulanmış" etiketi bizim
+/// uydurdugumuz bir bayrak degildir.
+class _PhoneVerificationRow extends ConsumerWidget {
+  @override
+  Widget build(BuildContext context, WidgetRef ref) {
+    final phone = ref.watch(verifiedPhoneProvider).valueOrNull;
+    final verified = phone != null && phone.isNotEmpty;
+
+    return ListTile(
+      contentPadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 4),
+      leading: Container(
+        width: 38,
+        height: 38,
+        decoration: BoxDecoration(
+          color: verified ? AppColors.successBg : AppColors.surfaceMuted,
+          borderRadius: BorderRadius.circular(11),
+        ),
+        child: Icon(
+          verified ? Icons.verified_rounded : Icons.phone_iphone_rounded,
+          size: 19,
+          color: verified ? AppColors.successInk : AppColors.textSecondary,
+        ),
+      ),
+      title: Row(
+        children: [
+          Flexible(
+            child: Text(
+              verified ? 'Telefon doğrulandı' : 'Telefonunuzu doğrulayın',
+              maxLines: 1,
+              overflow: TextOverflow.ellipsis,
+              style: Theme.of(context).textTheme.titleSmall,
+            ),
+          ),
+          if (verified) ...[
+            const SizedBox(width: 8),
+            Container(
+              padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
+              decoration: BoxDecoration(
+                color: AppColors.successBg,
+                borderRadius: BorderRadius.circular(AppTheme.radiusBadge),
+              ),
+              child: const Text(
+                'Doğrulanmış',
+                style: TextStyle(
+                  color: AppColors.successInk,
+                  fontSize: 10.5,
+                  fontWeight: FontWeight.w800,
+                ),
+              ),
+            ),
+          ],
+        ],
+      ),
+      subtitle: Text(
+        verified
+            ? TrPhone.mask(phone)
+            : 'Hesabınızı SMS ile doğrulayın',
+        style: Theme.of(context).textTheme.bodySmall,
+      ),
+      trailing: verified
+          ? null
+          : const Icon(Icons.chevron_right,
+              color: AppColors.textSecondary, size: 20),
+      onTap: verified
+          ? null
+          : () {
+              Haptics.tap();
+              Navigator.of(context).push(
+                MaterialPageRoute(
+                  builder: (_) => const PhoneVerificationScreen(),
+                ),
+              );
+            },
     );
   }
 }

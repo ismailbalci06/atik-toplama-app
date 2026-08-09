@@ -1,0 +1,166 @@
+// TELEFON DOGRULAMA — numara normalizasyonu ve ekran davranisi.
+//
+// Numara normalizasyonu saf bir fonksiyondur (Firebase'e dokunmaz), bu
+// yuzden sinir vakalari burada eksiksiz sinanabilir. "Numaram gecerli ama
+// kabul etmiyor" tipi sikayetlerin kaynagi hep bu katmandir.
+import 'package:atik_toplama_app/features/verification/data/phone_verification_repository.dart';
+import 'package:atik_toplama_app/features/verification/domain/tr_phone.dart';
+import 'package:atik_toplama_app/features/verification/presentation/screens/phone_verification_screen.dart';
+import 'package:firebase_auth/firebase_auth.dart';
+import 'package:flutter/material.dart';
+import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:flutter_test/flutter_test.dart';
+
+void main() {
+  group('TrPhone.normalize — kullanicinin yazdigi her bicim', () {
+    const beklenen = '+905321234567';
+
+    test('bosluklu, sifirli: "0532 123 45 67"', () {
+      expect(TrPhone.normalize('0532 123 45 67'), beklenen);
+    });
+
+    test('bitisik, sifirli: "05321234567"', () {
+      expect(TrPhone.normalize('05321234567'), beklenen);
+    });
+
+    test('sifirsiz: "532 123 45 67"', () {
+      expect(TrPhone.normalize('532 123 45 67'), beklenen);
+    });
+
+    test('ulke koduyla: "+90 532 123 45 67"', () {
+      expect(TrPhone.normalize('+90 532 123 45 67'), beklenen);
+    });
+
+    test('ulke kodu artisiz: "905321234567"', () {
+      expect(TrPhone.normalize('905321234567'), beklenen);
+    });
+
+    test('tireli/parantezli: "(0532) 123-45-67"', () {
+      expect(TrPhone.normalize('(0532) 123-45-67'), beklenen);
+    });
+  });
+
+  group('TrPhone.normalize — GECERSIZ girdiler reddedilir', () {
+    test('bos metin', () => expect(TrPhone.normalize(''), isNull));
+    test('harf', () => expect(TrPhone.normalize('telefon'), isNull));
+
+    test('eksik hane', () {
+      expect(TrPhone.normalize('0532 123 45'), isNull);
+    });
+
+    test('fazla hane', () {
+      expect(TrPhone.normalize('0532 123 45 67 89'), isNull);
+    });
+
+    test('sabit hat (5 ile baslamiyor)', () {
+      // Turkiye cep hatlari daima 5 ile baslar
+      expect(TrPhone.normalize('0212 123 45 67'), isNull);
+      expect(TrPhone.normalize('0312 123 45 67'), isNull);
+    });
+  });
+
+  group('TrPhone.mask — numara tam gosterilmez', () {
+    test('yalnizca son iki hane gorunur', () {
+      final masked = TrPhone.mask('+905321234567');
+      expect(masked, contains('67'));
+      expect(masked, isNot(contains('5321234')),
+          reason: 'numaranin govdesi ekranda durmamali');
+      expect(masked, contains('•'));
+    });
+  });
+
+  group('TrPhone.pretty', () {
+    test('okunakli bicime cevirir', () {
+      expect(TrPhone.pretty('+905321234567'), '0532 123 45 67');
+    });
+  });
+
+  group('Hata mesajlari TURKCE ve eyleme donuk', () {
+    test('Console kurulumu eksikse ne yapilacagi yazar', () {
+      final msg = phoneAuthMessage(
+        FirebaseAuthException(code: 'operation-not-allowed'),
+      );
+      expect(msg, contains('Console'));
+      expect(msg, contains('Phone'));
+    });
+
+    test('kod hatasi anlasilir', () {
+      final msg = phoneAuthMessage(
+        FirebaseAuthException(code: 'invalid-verification-code'),
+      );
+      expect(msg, contains('kod'));
+      expect(msg, isNot(contains('invalid-verification-code')));
+    });
+
+    test('numara baskasina bagliysa aciklanir', () {
+      final msg = phoneAuthMessage(
+        FirebaseAuthException(code: 'credential-already-in-use'),
+      );
+      expect(msg, contains('başka bir hesaba'));
+    });
+
+    test('bilinmeyen kod ham haliyle GOSTERILIR (sessizce yutulmaz)', () {
+      final msg = phoneAuthMessage(
+        FirebaseAuthException(code: 'beklenmedik-kod', message: 'detay'),
+      );
+      expect(msg, contains('beklenmedik-kod'));
+    });
+
+    test('oturum yoksa anlasilir uyari', () {
+      final msg = phoneAuthMessage(StateError('önce giriş yapmalısınız.'));
+      expect(msg, contains('giriş'));
+    });
+  });
+
+  group('Dogrulama ekrani', () {
+    Widget host() => const ProviderScope(
+          child: MaterialApp(home: PhoneVerificationScreen()),
+        );
+
+    testWidgets('gecersiz numarada "Kod Gönder" KAPALI', (t) async {
+      t.view.physicalSize = const Size(420, 900);
+      t.view.devicePixelRatio = 1.0;
+      addTearDown(t.view.reset);
+
+      await t.pumpWidget(host());
+      await t.pump();
+
+      // Bos halde kapali olmali
+      var button = t.widget<ElevatedButton>(find.byType(ElevatedButton));
+      expect(button.onPressed, isNull);
+
+      // Eksik haneli numara da acmamali
+      await t.enterText(find.byType(TextField), '0532 123');
+      await t.pump();
+      button = t.widget<ElevatedButton>(find.byType(ElevatedButton));
+      expect(button.onPressed, isNull);
+    });
+
+    testWidgets('gecerli numarada buton ACILIR', (t) async {
+      t.view.physicalSize = const Size(420, 900);
+      t.view.devicePixelRatio = 1.0;
+      addTearDown(t.view.reset);
+
+      await t.pumpWidget(host());
+      await t.pump();
+
+      await t.enterText(find.byType(TextField), '0532 123 45 67');
+      await t.pump();
+
+      final button = t.widget<ElevatedButton>(find.byType(ElevatedButton));
+      expect(button.onPressed, isNotNull);
+    });
+
+    testWidgets('numara ekranda MASKELENECEGI bilgisi ve gizlilik notu var',
+        (t) async {
+      t.view.physicalSize = const Size(420, 900);
+      t.view.devicePixelRatio = 1.0;
+      addTearDown(t.view.reset);
+
+      await t.pumpWidget(host());
+      await t.pump();
+
+      expect(find.textContaining('diğer kullanıcılara'), findsOneWidget);
+    });
+  });
+}
