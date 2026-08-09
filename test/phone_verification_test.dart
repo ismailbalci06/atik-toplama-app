@@ -82,6 +82,9 @@ void main() {
       );
       expect(msg, contains('Console'));
       expect(msg, contains('Phone'));
+      // Firebase ayni kodu bolge politikasi icin de kullaniyor —
+      // ikisi de yazmali, yoksa yanlis yere bakilir (bir kez yasandi).
+      expect(msg, contains('SMS region policy'));
     });
 
     test('kod hatasi anlasilir', () {
@@ -89,7 +92,10 @@ void main() {
         FirebaseAuthException(code: 'invalid-verification-code'),
       );
       expect(msg, contains('kod'));
-      expect(msg, isNot(contains('invalid-verification-code')));
+      // Anlasilir aciklama ONDE, ham Firebase kodu ARKADA olmali:
+      // teshis bir daha gizlenmesin diye ikisi birlikte gosteriliyor.
+      expect(msg.indexOf('Doğrulama kodu hatalı'),
+          lessThan(msg.indexOf('invalid-verification-code')));
     });
 
     test('numara baskasina bagliysa aciklanir', () {

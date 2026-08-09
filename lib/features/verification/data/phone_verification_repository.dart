@@ -63,10 +63,14 @@ class PhoneVerificationRepository {
 
 /// Phone Auth hata kodlarini TURKCE ve EYLEME DONUK mesajlara cevirir.
 ///
-/// Ham Firebase mesajlari ("invalid-verification-code") kullaniciya
-/// hicbir sey anlatmaz. Ozellikle `operation-not-allowed` onemlidir:
-/// bu, Console'da Phone saglayicisinin acilmadigi anlamina gelir ve
-/// kurulum sirasinda en sik karsilasilan hatadir.
+/// TASARIM KARARI — HAM HATA ASLA GIZLENMEZ:
+/// Once anlasilir bir Turkce aciklama, ardindan Firebase'in kendi kodu ve
+/// mesaji eklenir. Sebebi acikca yasandi: `operation-not-allowed` kodunu
+/// Firebase IKI ayri durum icin kullaniyor — (1) Phone saglayicisi kapali,
+/// (2) SMS bolge politikasi ulkeyi engelliyor. Yalnizca bizim yorumumuzu
+/// gostermek, "saglayici acik ama hala hata aliyorum" cikmazina sokuyordu.
+/// Ham mesaj ("...until this region enabled by the app developer") ise
+/// dogru teshisi tek basina veriyor.
 String phoneAuthMessage(Object error) {
   if (error is StateError) return error.message;
   if (error is! FirebaseAuthException) {
@@ -78,6 +82,15 @@ String phoneAuthMessage(Object error) {
     return raw.replaceFirst('Exception: ', '');
   }
 
+  final friendly = _friendlyPhoneMessage(error);
+  // Ham kod + mesaj HER ZAMAN eklenir; teshis bir daha gizlenmesin.
+  final rawDetail = error.message == null || error.message!.trim().isEmpty
+      ? '[${error.code}]'
+      : '[${error.code}] ${error.message}';
+  return '$friendly\n\nFirebase: $rawDetail';
+}
+
+String _friendlyPhoneMessage(FirebaseAuthException error) {
   switch (error.code) {
     case 'invalid-phone-number':
       return 'Telefon numarası geçersiz görünüyor. Numarayı kontrol edin.';
@@ -94,9 +107,13 @@ String phoneAuthMessage(Object error) {
     case 'provider-already-linked':
       return 'Bu hesapta zaten doğrulanmış bir telefon numarası var.';
     case 'operation-not-allowed':
-      return 'Telefon doğrulama bu projede etkin değil. '
-          'Firebase Console → Authentication → Sign-in method → Phone '
-          'sağlayıcısı açılmalı.';
+      // Firebase bu kodu IKI ayri sebep icin kullaniyor. Ikisini de
+      // yaziyoruz; hangisi oldugunu asagidaki ham mesaj soyler.
+      return 'Telefon doğrulama şu an mümkün değil. İki olası sebep:\n'
+          '① Console → Authentication → Sign-in method → Phone '
+          'sağlayıcısı kapalı olabilir.\n'
+          '② Console → Authentication → Settings → SMS region policy '
+          'Türkiye\'ye (+90) izin vermiyor olabilir.';
     case 'captcha-check-failed':
       return 'Güvenlik doğrulaması tamamlanamadı. Sayfayı yenileyip '
           'tekrar deneyin.';

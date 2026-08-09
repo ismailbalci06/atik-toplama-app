@@ -168,10 +168,33 @@ class _PhoneVerificationScreenState
               ),
             ),
             const SizedBox(height: 8),
-            Text(
-              'Türkiye cep numarası. Ülke kodu otomatik eklenir.',
-              style: text.bodySmall,
-            ),
+            // SEFFAFLIK: Firebase'e TAM OLARAK ne gonderilecegini gosteriyoruz.
+            // Boylece "numara yanlis mi gidiyor?" sorusu bir daha tahmine
+            // kalmaz; kullanici bastaki 0'in temizlendigini kendi gorur.
+            if (_phoneValid)
+              Row(
+                children: [
+                  const Icon(Icons.check_circle_outline_rounded,
+                      size: 15, color: AppColors.successInk),
+                  const SizedBox(width: 6),
+                  Expanded(
+                    child: Text(
+                      'Gönderilecek numara: '
+                      '${TrPhone.normalize(_phoneController.text)}',
+                      style: text.bodySmall?.copyWith(
+                        color: AppColors.successInk,
+                        fontWeight: FontWeight.w700,
+                      ),
+                    ),
+                  ),
+                ],
+              )
+            else
+              Text(
+                'Türkiye cep numarası (5 ile başlar). Ülke kodu ve baştaki '
+                '0 otomatik düzenlenir.',
+                style: text.bodySmall,
+              ),
           ] else ...[
             TextField(
               controller: _codeController,
