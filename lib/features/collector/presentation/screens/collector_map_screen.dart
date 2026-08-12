@@ -10,6 +10,7 @@ import '../../../../core/utils/map_utils.dart';
 import '../../../../core/utils/marker_icons.dart';
 import '../../../../core/utils/route_optimizer.dart';
 import '../../../../core/utils/routing_providers.dart';
+import '../../../../core/widgets/osm_attribution.dart';
 import '../../../../core/widgets/premium_progress_bar.dart';
 import '../../../auth/presentation/providers/auth_providers.dart';
 import '../../../reputation/presentation/providers/reputation_providers.dart';
@@ -975,7 +976,8 @@ class _CollectorMapScreenState extends ConsumerState<CollectorMapScreen>
             Positioned(
               left: 16,
               right: 16,
-              bottom: 24,
+              // 24 -> 46: alttaki OSM atif etiketine yer aciyor.
+              bottom: 46,
               child: Card(
                 elevation: 6,
                 shape: RoundedRectangleBorder(
@@ -1018,7 +1020,8 @@ class _CollectorMapScreenState extends ConsumerState<CollectorMapScreen>
           // --- Sag altta: araca odaklan butonu ---
           Positioned(
             right: 16,
-            bottom: isDriving ? 120 : 24,
+            // +22: alt kartlar OSM atif etiketi icin yukari kaydi.
+            bottom: isDriving ? 142 : 46,
             child: PointerInterceptor(
               child: FloatingActionButton.small(
                 heroTag: 'btn_collector_location',
@@ -1033,6 +1036,17 @@ class _CollectorMapScreenState extends ConsumerState<CollectorMapScreen>
                 child: const Icon(Icons.my_location),
               ),
             ),
+          ),
+
+          // --- OSM atfi (ODbL) — yasal zorunluluk ---
+          // Stack'in EN SON cocugu: ustunu hicbir kart kapatmasin.
+          // Google'in alt seridinin USTUNDE durur; ayrintili gerekce
+          // osm_attribution.dart icinde.
+          const Positioned(
+            left: 0,
+            right: 0,
+            bottom: 24,
+            child: Center(child: OsmAttribution()),
           ),
         ],
       ),

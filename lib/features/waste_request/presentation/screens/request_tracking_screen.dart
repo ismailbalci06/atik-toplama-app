@@ -9,6 +9,7 @@ import '../../../../core/utils/error_utils.dart';
 import '../../../../core/utils/map_utils.dart';
 import '../../../../core/utils/marker_icons.dart';
 import '../../../../core/utils/routing_providers.dart';
+import '../../../../core/widgets/osm_attribution.dart';
 import '../../../../core/widgets/premium_progress_bar.dart';
 import '../../../collector/presentation/widgets/arrival_celebration_dialog.dart';
 import '../../../reputation/presentation/providers/reputation_providers.dart';
@@ -741,9 +742,21 @@ class _RequestTrackingScreenState extends ConsumerState<RequestTrackingScreen>
             Positioned(
               left: 16,
               right: 16,
-              bottom: 24,
+              // 24 -> 46: alttaki OSM atif etiketine yer aciyor.
+              bottom: 46,
               child: PointerInterceptor(child: _buildCollectorCard()),
             ),
+
+          // --- OSM atfi (ODbL) — yasal zorunluluk ---
+          // Stack'in EN SON cocugu: ustunu hicbir kart kapatmasin.
+          // Google'in alt seridinin USTUNDE durur; ayrintili gerekce
+          // osm_attribution.dart icinde.
+          const Positioned(
+            left: 0,
+            right: 0,
+            bottom: 24,
+            child: Center(child: OsmAttribution()),
+          ),
         ],
       ),
     );

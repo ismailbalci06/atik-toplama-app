@@ -25,10 +25,12 @@ dependencies:
   firebase_core: ^3.1.0
   firebase_auth: ^5.1.0        # E-posta/sifre ile giris-kayit
   cloud_firestore: ^5.0.1     # Talep kayitlari icin (kalici veri)
-  firebase_database: ^11.0.1  # Canli konum takibi icin (Realtime DB)
+  # NOT: firebase_database (Realtime DB) KULLANILMIYOR. Canli konum,
+  # Firestore'daki collectorLocation alanindan akiyor. Kullanilmayan
+  # bagimlilik lisans beyanini ve teslim edilen kaynak kodu kirletmesin
+  # diye kaldirildi (sartname md. 10.4).
 
   # --- Yardimci ---
-  uuid: ^4.4.0                # Talepler icin benzersiz ID uretimi
   intl: ^0.19.0               # Tarih/saat formatlama
   http: ^1.2.0                # OSRM yol tarifi servisine istek
 

@@ -39,6 +39,16 @@
             "value": "no-cache"
           }
         ]
+      },
+      {
+        "_comment": "KOK DIZIN: kimse /index.html istemez, herkes / ister. rewrites '/' yolunu index.html'e cevirir AMA header kurallari ORIJINAL yola gore eslesir; bu kural olmadan / hicbir globa uymaz ve Firebase varsayilani max-age=3600 ile gider (yeni deploy 1 saat gorunmez). Ayni basligi eden SONRAKI kural kazandigi icin bu blok listenin EN SONUNDA kalmali.",
+        "source": "/",
+        "headers": [
+          {
+            "key": "Cache-Control",
+            "value": "no-cache"
+          }
+        ]
       }
     ]
   },
