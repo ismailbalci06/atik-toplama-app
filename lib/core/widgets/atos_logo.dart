@@ -4,9 +4,11 @@ import '../constants/app_colors.dart';
 
 /// ATOS logo bileseni — orijinal marka gorseli.
 ///
-/// Logo dosyasi: `assets/images/atos_logo.png` (1024x352).
-/// Gorselin kendi icinde "ADVANCED TECHNOLOGY & OPTIMIZED SUSTAINABILITY"
-/// alt basligi bulundugu icin [showTagline] varsayilan olarak KAPALI.
+/// Logo dosyasi: `assets/images/atos_logo.png` (789x261).
+/// Gorselin kendi icinde "ATIK TOPLAMA SISTEMI" alt basligi bulundugu icin
+/// [showTagline] varsayilan olarak KAPALI — acilirsa satir IKI KERE gorunur.
+/// (Alt baslik 13 Agustos 2026'da Ingilizceden Turkceye cevrildi; kisaltma
+/// Turkcede de tutuyor: Atik TOplama Sistemi.)
 ///
 /// Tum ekranlar bu widget'i kullanir; logo degisirse tek dosya guncellenir.
 class AtosLogo extends StatelessWidget {

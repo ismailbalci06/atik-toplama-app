@@ -41,7 +41,10 @@ class RoleSelectScreen extends ConsumerWidget {
               const SizedBox(height: 36),
 
               // --- ATOS logosu ---
-              const Center(child: AtosLogo(height: 46, showTagline: true)),
+              // showTagline KAPALI: gorselin kendi icinde artik "ATIK TOPLAMA
+              // SISTEMI" yaziyor, ayrica alt baslik eklenirse satir iki kere
+              // gorunur.
+              const Center(child: AtosLogo(height: 46)),
               const SizedBox(height: 26),
 
               // --- Karsilama ---
