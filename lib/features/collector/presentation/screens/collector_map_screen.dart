@@ -1,3 +1,4 @@
+import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:google_maps_flutter/google_maps_flutter.dart';
@@ -10,7 +11,6 @@ import '../../../../core/utils/map_utils.dart';
 import '../../../../core/utils/marker_icons.dart';
 import '../../../../core/utils/route_optimizer.dart';
 import '../../../../core/utils/routing_providers.dart';
-import '../../../../core/widgets/osm_attribution.dart';
 import '../../../../core/widgets/premium_progress_bar.dart';
 import '../../../auth/presentation/providers/auth_providers.dart';
 import '../../../reputation/presentation/providers/reputation_providers.dart';
@@ -187,7 +187,11 @@ class _CollectorMapScreenState extends ConsumerState<CollectorMapScreen>
       }
     } catch (e, s) {
       // Kare basina hata: akisi KESME, sadece kaydet.
-      debugPrint('🔥 Yolculuk karesi hatasi: ${readableError(e)}\n$s');
+      // Yalnizca gelistirmede: debugPrint yayin derlemesinde ayiklanmaz
+      // ve yigin izi kullanicinin konsoluna dusmemeli.
+      if (kDebugMode) {
+        debugPrint('🔥 Yolculuk karesi hatasi: ${readableError(e)}\n$s');
+      }
     }
   }
 
@@ -1038,16 +1042,10 @@ class _CollectorMapScreenState extends ConsumerState<CollectorMapScreen>
             ),
           ),
 
-          // --- OSM atfi (ODbL) — yasal zorunluluk ---
-          // Stack'in EN SON cocugu: ustunu hicbir kart kapatmasin.
-          // Google'in alt seridinin USTUNDE durur; ayrintili gerekce
-          // osm_attribution.dart icinde.
-          const Positioned(
-            left: 0,
-            right: 0,
-            bottom: 24,
-            child: Center(child: OsmAttribution()),
-          ),
+          // OSM atfi KALDIRILDI: rota geometrisi artik OpenStreetMap'ten
+          // (OSRM) degil Google Routes API'den geliyor. Google'in kendi
+          // atfi Maps SDK tarafindan cizilir ve kapatilamaz; ayrica bir
+          // etiket gostermek, var olmayan bir kaynaga atif vermek olurdu.
         ],
       ),
     );

@@ -57,8 +57,12 @@ if ! command -v flutter >/dev/null 2>&1; then
 fi
 
 # --- 3) Derle ---
+# --dart-define: anahtar Dart tarafina da gecer. Rota servisi (Routes API)
+# onu String.fromEnvironment ile okur. Verilmezse rota servisi kendini
+# devre disi birakir ve harita kavisli cizgiyle calismaya devam eder —
+# yani eksik anahtar derlemeyi degil, yalnizca iyilestirmeyi dusurur.
 echo "==> flutter build web --release"
-flutter build web --release "$@"
+flutter build web --release --dart-define=MAPS_API_KEY="$KEY" "$@"
 
 # --- 4) Yer tutucuyu gercek anahtarla degistir ---
 if [[ ! -f "$INDEX" ]]; then

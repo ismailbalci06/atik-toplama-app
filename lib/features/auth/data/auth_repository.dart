@@ -117,9 +117,15 @@ class AuthRepository {
   /// Oturumu kapatir
   Future<void> signOut() => _auth.signOut();
 
-  /// Gelistirici konsoluna ayrintili kayit (kullaniciya gosterilmez)
+  /// Gelistirici konsoluna ayrintili kayit (kullaniciya gosterilmez).
+  ///
+  /// YALNIZCA gelistirme derlemesinde yazar. `debugPrint` yayin
+  /// derlemesinde ayiklanmaz; Firebase hata metinleri bazen girilen
+  /// e-postayi tasidigi icin kosul ACIKCA konur.
   void _log(String op, String code, String? message) {
-    debugPrint('🔐 Auth[$op] kod="$code" mesaj="${message ?? ''}"');
+    if (kDebugMode) {
+      debugPrint('🔐 Auth[$op] kod="$code" mesaj="${message ?? ''}"');
+    }
   }
 
   /// Firebase hata kodlarini KULLANICI DILINE cevirir.

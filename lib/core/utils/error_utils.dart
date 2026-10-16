@@ -43,7 +43,11 @@ String readableError(Object error) {
 /// hem loglama hem mesaj uretmek icin kullanilir.
 String logAndReadError(Object error, {String? context}) {
   final readable = readableError(error);
-  debugPrint('🔥 Firestore hatası${context == null ? '' : ' ($context)'}: '
-      '$readable');
+  // Yalnizca gelistirmede yazilir: debugPrint yayin derlemesinde
+  // ayiklanmaz, bu yuzden kosul ACIKCA konur.
+  if (kDebugMode) {
+    debugPrint('🔥 Firestore hatası${context == null ? '' : ' ($context)'}: '
+        '$readable');
+  }
   return readable;
 }

@@ -1,4 +1,5 @@
 import 'package:firebase_core/firebase_core.dart';
+import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
@@ -20,7 +21,11 @@ void main() async {
       options: DefaultFirebaseOptions.currentPlatform,
     );
   } catch (e) {
-    debugPrint('⚠️ Firebase başlatılamadı (UI modunda devam): $e');
+    // Yalnizca gelistirmede yazilir: debugPrint yayin derlemesinde
+    // ayiklanmaz, bu yuzden kosul ACIKCA konur.
+    if (kDebugMode) {
+      debugPrint('⚠️ Firebase başlatılamadı (UI modunda devam): $e');
+    }
   }
 
   // ProviderScope: Riverpod'un tum provider'lari yasatabilmesi icin
